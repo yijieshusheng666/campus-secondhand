@@ -1,0 +1,31 @@
+# IDE
+.idea/
+*.iml
+*.iws
+*.ipr
+
+# Maven
+target/
+.mvn/wrapper/maven-wrapper.jar
+
+# STS
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+# VS Code
+.vscode/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# 上传文件（根据情况决定是否忽略）
+demo1/uploads/
+
+# 敏感配置（包含数据库密码，不要提交）
+demo1/src/main/resources/application.properties

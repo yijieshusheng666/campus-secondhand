@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>个人中心</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;font-family:Microsoft YaHei,sans-serif}
+    body{background:#f5f7fa;padding-top:100px}
+    a{text-decoration:none;color:inherit}
+
+    .header{
+      background:#2d8cf0;color:white;
+      padding:14px 16px;text-align:center;
+      font-size:18px;font-weight:bold;
+      position:fixed;top:0;left:0;width:100%;z-index:999;
+    }
+
+    .nav{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,0.1);position:fixed;top:54px;left:0;width:100%;z-index:998;}
+    .nav-list{
+      max-width:1200px;margin:0 auto;
+      display:flex;justify-content:center;flex-wrap:wrap;
+      list-style:none;
+    }
+    .nav-list li{padding:12px 16px;font-size:15px}
+    .nav-list li:hover{color:#2d8cf0}
+    .nav-list li.active a{color:#2d8cf0;font-weight:bold}
+
+    .user-info{
+      background:#fff;margin:20px;padding:20px;
+      border-radius:8px;text-align:center;cursor:pointer;
+    }
+    .avatar{
+            width:80px;height:80px;
+            border-radius:50%;margin:0 auto 10px;
+            background-size:cover;
+            background-position:center;
+        }
+
+    .menu{
+      background:#fff;margin:0 20px 20px;
+      border-radius:8px;overflow:hidden;
+    }
+    .menu-item{
+      padding:14px 16px;border-bottom:1px solid #f0f0f0;
+      font-size:15px;cursor:pointer;
+    }
+    .menu-item:last-child{border-bottom:none}
+
+    .tip{color:#999;font-size:14px;margin-top:5px}
+
+    .modal{
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.5);display:none;
+      justify-content:center;align-items:center;z-index:999;
+    }
+    .modal-box{
+      background:#fff;padding:25px;border-radius:12px;width:90%;max-width:400px;max-height:80vh;overflow-y:auto;
+    }
+    .modal-box h3{margin-bottom:15px;text-align:center}
+    .modal-box input,.modal-box textarea{
+      width:100%;padding:10px;margin-bottom:12px;
+      border:1px solid #ddd;border-radius:8px;
+    }
+    .modal-btn{
+      display:flex;gap:10px;margin-top:5px;
+    }
+    .modal-btn button{
+      flex:1;padding:10px;border:none;border-radius:8px;cursor:pointer;
+    }
+    .btn-ok{background:#2d8cf0;color:#fff}
+    .btn-close{background:#f5f7fa}
+
+    .add-item{
+      position: relative;
+      padding: 10px 30px 10px 10px;
+      border:1px solid #ddd;border-radius:8px;margin-bottom:8px;cursor:pointer;
+    }
+    .add-item.active{
+      border-color:#2d8cf0;background:#edf7ff;
+    }
+    .add-list{margin-bottom:15px}
+    .del-btn {
+      position: absolute;
+      right: 8px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #f34141;
+      font-size: 16px;
+      cursor: pointer;
+      padding: 0 4px;
+    }
+
+    .publish-box{
+      background:#fff;margin:0 20px 20px;padding:15px;border-radius:8px;
+    }
+    .publish-header{
+      display:flex;justify-content:space-between;align-items:center;
+      margin-bottom:15px;padding-bottom:10px;border-bottom:1px solid #f0f0f0;
+    }
+    .publish-header h3{font-size:16px;font-weight:bold}
+    .batch-actions{
+      display:flex;gap:10px;
+    }
+    .batch-actions button{
+      padding:6px 14px;border-radius:4px;border:none;cursor:pointer;
+      font-size:14px;
+    }
+    .batch-delete-btn{
+      background:#fff;color:#f34141;border:1px solid #f34141;
+    }
+    .batch-delete-btn:hover{background:#fff5f5}
+
+    .publish-item{
+      padding:12px;border-bottom:1px solid #f0f0f0;
+      position:relative;
+      display:flex;
+      align-items:flex-start;
+    }
+    .publish-item:last-child{border-bottom:none;}
+    .checkbox-col{
+      margin-right:10px;
+      margin-top:2px;
+    }
+    .publish-name{font-weight:bold;margin-bottom:4px;}
+    .publish-price{color:#f34141;margin-bottom:4px;}
+    .publish-desc{font-size:13px;color:#666;line-height:1.4;}
+    .publish-actions{
+      margin-top:8px;text-align:right;
+    }
+    .delete-btn{
+      padding:4px 12px;background:#fff;color:#f34141;
+      border:1px solid #f34141;border-radius:4px;cursor:pointer;
+      font-size:12px;
+    }
+    .delete-btn:hover{background:#fff5f5}
+    .empty-tip{text-align:center;padding:30px 0;color:#999;}
+
+    .sales-box{
+      background:#fff;margin:0 20px 20px;padding:15px;border-radius:8px;
+    }
+    .sales-header{
+      display:flex;justify-content:space-between;align-items:center;
+      margin-bottom:15px;padding-bottom:10px;border-bottom:1px solid #f0f0f0;
+    }
+    .sales-header h3{font-size:16px;font-weight:bold}
+    .sales-item{
+      padding:12px;border-bottom:1px solid #f0f0f0;
+    }
+    .sales-item:last-child{border-bottom:none}
+    .sales-item-header{
+      display:flex;justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .sales-buyer{font-weight:bold}
+    .sales-status{
+      padding:3px 8px;border-radius:4px;font-size:12px;
+    }
+    .status-pending{background:#fff3cd;color:#856404}
+    .status-shipped{background:#d1ecf1;color:#0c5460}
+    .status-completed{background:#d4edda;color:#155724}
+    .sales-goods{font-size:14px;color:#333;margin-bottom:4px}
+    .sales-price{color:#f34141;font-weight:bold;margin-bottom:6px}
+    .sales-address{font-size:13px;color:#666;margin-bottom:4px}
+    .sales-time{font-size:12px;color:#999}
+    .sales-actions{margin-top:8px;text-align:right}
+    .ship-btn{
+      padding:4px 12px;background:#2d8cf0;color:#fff;
+      border:none;border-radius:4px;cursor:pointer;
+      font-size:12px;margin-left:6px;
+    }
+    .ship-btn:hover{background:#1c7cd6}
+
+    .alert-box{
+      position:fixed;top:20%;left:50%;transform:translate(-50%,-50%);
+      background:#2d8cf0;color:#fff;padding:12px 24px;border-radius:12px;
+      z-index:9999;display:none;min-width:180px;text-align:center;
+    }
+    .confirm-box{
+      position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+      background:#fff;padding:20px 24px;border-radius:12px;
+      z-index:9999;display:none;min-width:200px;text-align:center;
+      box-shadow:0 2px 15px rgba(0,0,0,0.2);
+    }
+    .confirm-box button{
+      margin:10px 5px 0;padding:6px 14px;border-radius:8px;
+      border:none;cursor:pointer;
+    }
+    .confirm-ok{background:#2d8cf0;color:#fff}
+    .confirm-cancel{background:#f5f7fa}
+  </style>
+</head>
+<body>
+
+<div class="header">校园二手交易平台</div>
+<div class="nav">
+  <ul class="nav-list">
+    <li><a href="index.html">首页</a ></li>
+    <li><a href="publish.html">发布商品</a ></li>
+    <li><a href="order.html">我的订单</a ></li>
+    <li><a href="user.html">个人中心</a ></li>
+    <li><a href="chat.html">智能客服</a ></li>
+  </ul>
+</div>
+
+<div class="user-info" onclick="toLogin()">
+  <div class="avatar" style="background-image:url('images/3.png')"></div>
+  <h3 id="username"></h3>
+  <p id="stuid"></p>
+  <p class="tip" id="tip"></p>
+</div>
+
+<div class="menu" id="menu">
+  <div class="menu-item" onclick="showEditModal()">基本信息设置</div>
+  <div class="menu-item" onclick="showMyPublish()">我发布的商品</div>
+  <div class="menu-item" onclick="showSalesRecords()">售出记录</div>
+  <div class="menu-item" onclick="showAddressModal()">收货地址管理</div>
+  <div class="menu-item" onclick="logout()">退出登录</div>
+</div>
+
+<div id="publishArea" class="publish-box" style="display:none;">
+  <div id="publishList"></div>
+</div>
+
+<div id="salesArea" class="sales-box" style="display:none;">
+  <div id="salesList"></div>
+</div>
+
+<div class="modal" id="modal">
+  <div class="modal-box">
+    <h3>修改昵称</h3>
+    <input type="text" id="newName" placeholder="请输入新昵称">
+    <div class="modal-btn">
+      <button class="btn-ok" onclick="saveNickname()">保存</button>
+      <button class="btn-close" onclick="hideEditModal()">取消</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="addressModal">
+  <div class="modal-box">
+    <h3>收货地址管理</h3>
+    <div id="addList" class="add-list"></div>
+    <input type="text" id="receiver" placeholder="收货人">
+    <input type="text" id="phone" placeholder="联系电话">
+    <textarea id="addressDetail" placeholder="详细地址"></textarea>
+    <div class="modal-btn">
+      <button class="btn-ok" onclick="saveAddress()">保存地址</button>
+      <button class="btn-close" onclick="hideAddressModal()">关闭</button>
+    </div>
+  </div>
+</div>
+
+<div class="alert-box" id="alert"></div>
+<div class="confirm-box" id="confirm">
+  <div id="confirmText"></div>
+  <button class="confirm-cancel" onclick="hideConfirm()">取消</button>
+  <button class="confirm-ok" onclick="doConfirm()">确定</button>
+</div>
+
+<script>
+  const API_BASE = 'http://localhost:8080';
+  var selectedAddrId = null;
+  var confirmCallback = null;
+
+  function showAlert(msg){
+    var t = document.getElementById("alert");
+    t.innerText = msg;
+    t.style.display = "block";
+    setTimeout(()=>t.style.display="none",1500);
+  }
+
+  function showConfirm(text, callback){
+    document.getElementById("confirmText").innerText = text;
+    document.getElementById("confirm").style.display = "block";
+    confirmCallback = callback;
+  }
+  function hideConfirm(){
+    document.getElementById("confirm").style.display = "none";
+  }
+  function doConfirm(){
+    hideConfirm();
+    if(confirmCallback) confirmCallback();
+  }
+
+  // 设置导航栏激活状态
+  function setNavActive() {
+    const currentPath = window.location.pathname;
+    const navItems = document.querySelectorAll('.nav-list li');
+
+    navItems.forEach(item => {
+      const link = item.querySelector('a');
+      const href = link.getAttribute('href');
+
+      if (currentPath.includes(href)) {
+        item.classList.add('active');
+      } else {
+        item.classList.remove('active');
+      }
+    });
+  }
+
+  window.onload = function(){
+    // 设置导航栏激活状态
+    setNavActive();
+
+    var user = localStorage.getItem("user");
+    if(!user){
+      document.getElementById("username").innerText = "未登录";
+      document.getElementById("tip").innerText = "请先登录";
+      document.getElementById("menu").style.display = "none";
+      return;
+    }
+    var obj = JSON.parse(user);
+    document.getElementById("username").innerText = obj.username;
+    document.getElementById("stuid").innerText = "学号："+obj.stuid;
+  }
+
+  function toLogin(){
+    if(!localStorage.getItem("user")) location.href = "login.html";
+  }
+
+  function logout(){
+    localStorage.removeItem("user");
+    showAlert("已退出登录");
+    setTimeout(()=>location.reload(),1500);
+  }
+
+  // 昵称
+  function showEditModal(){
+    document.getElementById("modal").style.display = "flex";
+    var user = JSON.parse(localStorage.getItem("user"));
+    document.getElementById("newName").value = user.username || "";
+  }
+  function hideEditModal(){
+    document.getElementById("modal").style.display = "none";
+  }
+  function saveNickname(){
+    var newName = document.getElementById("newName").value.trim();
+    if(!newName){ showAlert("请输入昵称"); return; }
+    var user = JSON.parse(localStorage.getItem("user"));
+    user.username = newName;
+    localStorage.setItem("user", JSON.stringify(user));
+    document.getElementById("username").innerText = newName;
+    hideEditModal();
+    showAlert("昵称修改成功");
+  }
+
+  // 地址
+  function showAddressModal(){
+    document.getElementById("addressModal").style.display = "flex";
+    renderAddressList();
+  }
+  function hideAddressModal(){
+    document.getElementById("addressModal").style.display = "none";
+  }
+  function getAddressList(){
+    return JSON.parse(localStorage.getItem("addressList")) || [];
+  }
+  function renderAddressList(){
+    var list = getAddressList();
+    var html = "";
+    list.forEach((addr, idx)=>{
+      var cls = selectedAddrId == idx ? "add-item active" : "add-item";
+      html += `
+    <div class="${cls}">
+      <div onclick="selectAddr(${idx})" style="cursor:pointer;">
+        <div>${addr.receiver} ${addr.phone}</div>
+        <div style="font-size:13px;color:#666">${addr.address}</div>
+      </div>
+      <div class="del-btn" onclick="showDeleteConfirm(${idx}, event)">×</div>
+    </div>`;
+    });
+    document.getElementById("addList").innerHTML = html;
+  }
+  function selectAddr(idx){
+    selectedAddrId = idx;
+    renderAddressList();
+    var list = getAddressList();
+    var addr = list[idx];
+    document.getElementById("receiver").value = addr.receiver;
+    document.getElementById("phone").value = addr.phone;
+    document.getElementById("addressDetail").value = addr.address;
+  }
+  function saveAddress(){
+    var receiver = document.getElementById("receiver").value.trim();
+    var phone = document.getElementById("phone").value.trim();
+    var address = document.getElementById("addressDetail").value.trim();
+    if(!receiver || !phone || !address){ showAlert("请填写完整"); return; }
+    var list = getAddressList();
+    if(selectedAddrId != null){
+      list[selectedAddrId] = {receiver,phone,address};
+    }else{
+      list.push({receiver,phone,address});
+    }
+    localStorage.setItem("addressList", JSON.stringify(list));
+    showAlert("保存成功");
+    renderAddressList();
+  }
+
+  function showDeleteConfirm(idx, e){
+    e.stopPropagation();
+    showConfirm("确定要删除该地址吗？", function(){
+      var list = getAddressList();
+      list.splice(idx, 1);
+      localStorage.setItem("addressList", JSON.stringify(list));
+      if(selectedAddrId === idx){
+        selectedAddrId = null;
+        document.getElementById("receiver").value = "";
+        document.getElementById("phone").value = "";
+        document.getElementById("addressDetail").value = "";
+      }else if(selectedAddrId > idx){
+        selectedAddrId--;
+      }
+      renderAddressList();
+      showAlert("地址已删除");
+    });
+  }
+
+  // 发布
+  function showMyPublish(){
+    var area = document.getElementById("publishArea");
+    area.style.display = area.style.display=="none"?"block":"none";
+    renderMyPublish();
+  }
+
+  // 获取用户发布的商品
+  async function renderMyPublish(){
+    const publishList = document.getElementById("publishList");
+    publishList.innerHTML = '<div style="text-align: center; padding: 40px;">加载中...</div>';
+
+    // 获取当前登录用户信息
+    const user = JSON.parse(localStorage.getItem("user"));
+    if(!user){
+      publishList.innerHTML = '<div class="empty-tip">请先登录</div>';
+      return;
+    }
+
+    try {
+      const response = await fetch(API_BASE + '/api/goods');
+      const goods = await response.json();
+
+      // 筛选当前用户发布的商品
+      const myGoods = goods.filter(item => item.userId == (user.id || 1));
+
+      var html = "";
+      if(myGoods.length===0){
+        html = '<div class="empty-tip">暂无发布商品</div>';
+      }else{
+        html += '<div class="publish-header">\n        <h3>我的商品</h3>\n        <div class="batch-actions">\n          <button class="batch-delete-btn" onclick="batchDeleteGoods()">批量删除</button>\n        </div>\n      </div>';
+        myGoods.forEach(item=>{
+          html += `<div class="publish-item">
+        <div class="checkbox-col">
+          <input type="checkbox" class="goods-checkbox" value="${item.id}">
+        </div>
+        <div style="flex:1">
+          <div class="publish-name">${item.title}</div>
+          <div class="publish-price">¥${item.price}</div>
+          <div class="publish-desc">${item.description}</div>
+          <div class="publish-actions">
+            <button class="delete-btn" onclick="deleteGoods(${item.id})">删除商品</button>
+          </div>
+        </div>
+      </div>`;
+        });
+      }
+      document.getElementById("publishList").innerHTML = html;
+    } catch (error) {
+      publishList.innerHTML = '<div class="empty-tip">加载失败</div>';
+      console.error('获取商品失败:', error);
+    }
+  }
+
+  // 删除商品
+  async function deleteGoods(goodsId){
+    showConfirm("确定要删除该商品吗？删除后将从首页中移除。", async function(){
+      try {
+        const response = await fetch(API_BASE + `/api/goods/${goodsId}`, {
+          method: 'DELETE'
+        });
+
+        const result = await response.json();
+        if (result.success) {
+          showAlert("商品删除成功");
+          setTimeout(()=>{
+            renderMyPublish();
+            // 刷新页面让首页也更新
+            if(window.location.pathname.includes('index.html')){
+              location.reload();
+            }
+          }, 1500);
+        } else {
+          showAlert(result.message || "删除失败");
+        }
+      } catch (error) {
+        showAlert("网络错误，请检查后端服务是否启动");
+        console.error('删除商品失败:', error);
+      }
+    });
+  }
+
+  // 批量删除商品
+  async function batchDeleteGoods(){
+    const checkboxes = document.querySelectorAll('.goods-checkbox:checked');
+    const selectedIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+
+    if(selectedIds.length === 0){
+      showAlert("请选择要删除的商品");
+      return;
+    }
+
+    showConfirm(`确定要删除选中的 ${selectedIds.length} 个商品吗？`, async function(){
+      try {
+        // 批量删除商品
+        const deletePromises = selectedIds.map(id =>
+                fetch(API_BASE + `/api/goods/${id}`, {
+                  method: 'DELETE'
+                })
+        );
+
+        const responses = await Promise.all(deletePromises);
+        const results = await Promise.all(responses.map(r => r.json()));
+
+        const successCount = results.filter(r => r.success).length;
+        if(successCount > 0){
+          showAlert(`成功删除 ${successCount} 个商品`);
+          setTimeout(()=>{
+            renderMyPublish();
+            // 刷新页面让首页也更新
+            if(window.location.pathname.includes('index.html')){
+              location.reload();
+            }
+          }, 1500);
+        } else {
+          showAlert("删除失败");
+        }
+      } catch (error) {
+        showAlert("网络错误，请检查后端服务是否启动");
+        console.error('批量删除商品失败:', error);
+      }
+    });
+  }
+
+  function showSalesRecords(){
+    var area = document.getElementById("salesArea");
+    area.style.display = area.style.display=="none"?"block":"none";
+    renderSalesRecords();
+  }
+
+  function renderSalesRecords(){
+    const salesList = document.getElementById("salesList");
+    const user = JSON.parse(localStorage.getItem("user"));
+    if(!user){
+      salesList.innerHTML = '<div class="empty-tip">请先登录</div>';
+      return;
+    }
+
+    var orders = JSON.parse(localStorage.getItem("orders")) || [];
+    var sellerId = user.id || 1;
+    var mySales = orders.filter(order => order.sellerId == sellerId);
+
+    if(mySales.length === 0){
+      salesList.innerHTML = '<div class="empty-tip">暂无售出记录</div>';
+      return;
+    }
+
+    var html = '<div class="sales-header"><h3>售出记录</h3></div>';
+    mySales.forEach(order => {
+      var statusClass = 'status-pending';
+      if(order.status === '已发货') statusClass = 'status-shipped';
+      if(order.status === '已完成') statusClass = 'status-completed';
+      if(order.status === '已退款') statusClass = 'status-completed';
+
+      var showShipBtn = order.status === '待发货';
+
+      html += `<div class="sales-item">
+        <div class="sales-item-header">
+          <span class="sales-buyer">买家：${order.username}</span>
+          <span class="sales-status ${statusClass}">${order.status}</span>
+        </div>
+        <div class="sales-goods">商品：${order.goodsTitle}</div>
+        <div class="sales-price">¥${order.goodsPrice}</div>
+        <div class="sales-address">收货人：${order.receiver} ${order.phone} / ${order.address}</div>
+        <div class="sales-time">下单时间：${order.createTime}</div>
+        ${showShipBtn ? `<div class="sales-actions"><button class="ship-btn" onclick="shipOrder(${order.id})">标记发货</button></div>` : ''}
+      </div>`;
+    });
+    salesList.innerHTML = html;
+  }
+
+  function shipOrder(orderId){
+    showConfirm("确定将该订单标记为已发货吗？", function(){
+      var orders = JSON.parse(localStorage.getItem("orders")) || [];
+      var order = orders.find(o => o.id === orderId);
+      if(order){
+        order.status = '已发货';
+        localStorage.setItem("orders", JSON.stringify(orders));
+        showAlert("已标记为发货");
+        renderSalesRecords();
+      }
+    });
+  }
+</script>
+</body>
+</html>
