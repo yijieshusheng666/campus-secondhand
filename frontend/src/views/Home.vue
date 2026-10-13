@@ -21,6 +21,8 @@ const goodsList = ref([])
 const activeCategory = ref('全部')
 const keyword = ref('')
 const loading = ref(false)
+// 本次搜索实际走的链路：''（浏览）/ 'semantic'（语义召回）/ 'keyword'（关键词兜底）
+const searchMode = ref('')
 
 // 商品详情弹窗
 const detailVisible = ref(false)
@@ -56,11 +58,49 @@ async function loadGoods() {
 
 function selectCategory(cate) {
   activeCategory.value = cate
-  loadGoods()
+  // 已有搜索词时按新分类重搜，否则只是切换浏览
+  if (keyword.value.trim()) {
+    doSearch()
+  } else {
+    searchMode.value = ''
+    loadGoods()
+  }
 }
 
-function doSearch() {
-  loadGoods()
+/**
+ * 搜索：语义优先，关键词兜底。
+ * 语义召回走 /api/ai/search（AI 侧只负责按意思找，价格/分类/在售由后端过滤），
+ * AI 服务不可用或召回为空时，自动退回原来的关键词匹配，保证搜索永远可用。
+ */
+async function doSearch() {
+  const kw = keyword.value.trim()
+  if (!kw) {
+    searchMode.value = ''
+    return loadGoods()
+  }
+
+  loading.value = true
+  let semanticHits = null
+  try {
+    const params = { keyword: kw, topK: 12 }
+    if (activeCategory.value !== '全部') params.category = activeCategory.value
+    const { data } = await request.get('/ai/search', { params })
+    if (data.success && data.semantic && data.data.length > 0) {
+      semanticHits = data.data
+    }
+  } catch (e) {
+    // AI 服务不可用：静默回退关键词
+  }
+
+  if (semanticHits) {
+    goodsList.value = semanticHits
+    searchMode.value = 'semantic'
+    loading.value = false
+    return
+  }
+
+  await loadGoods()
+  searchMode.value = 'keyword'
 }
 
 async function showDetail(goods) {
@@ -180,9 +220,18 @@ onMounted(loadGoods)
       </div>
     </div>
 
+    <!-- 搜索链路提示：让"这次是怎么找到的"可见 -->
+    <div v-if="keyword.trim() && searchMode" class="search-mode">
+      <span class="sm-tag" :class="searchMode">
+        {{ searchMode === 'semantic' ? '🤖 语义匹配 · 按意思找货' : '🔤 关键词匹配' }}
+      </span>
+      <span class="sm-count">共 {{ goodsList.length }} 件</span>
+    </div>
+
     <!-- 宝贝卡片流 -->
     <div class="feed" v-loading="loading">
-      <el-empty v-if="!loading && goodsList.length === 0" description="这个分类暂无宝贝，去看看别的吧" />
+      <el-empty v-if="!loading && goodsList.length === 0"
+        :description="keyword.trim() ? '没找到匹配的宝贝，换个说法试试' : '这个分类暂无宝贝，去看看别的吧'" />
       <div class="feed-grid">
         <div v-for="item in goodsList" :key="item.id" class="goods-card">
           <img class="gc-img" :src="getImageUrl(item.images?.[0]?.imageUrl)" alt="宝贝" @click="showDetail(item)">
@@ -276,6 +325,21 @@ onMounted(loadGoods)
 .hero-title { font-size: 22px; color: var(--ink-color); font-weight: bold; }
 .hero-sub { font-size: 13px; color: #6b5400; margin-top: 6px; }
 .hero-search { display: flex; gap: 10px; flex: 1; max-width: 460px; min-width: 280px; }
+.search-mode {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 4px 0;
+}
+.sm-tag {
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  background: #fff3c2;
+  color: #8a6100;
+}
+.sm-tag.semantic { background: #e8f3ff; color: #1a5fb4; }
+.sm-count { font-size: 12px; color: #999; }
 .hero-search :deep(.el-input__wrapper) { border-radius: 20px; }
 
 /* 分类胶囊 */
