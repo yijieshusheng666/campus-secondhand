@@ -186,7 +186,7 @@ async function confirmOrder() {
       address
     })
     if (data.success) {
-      ElMessage.success({ message: '付款成功！订单已生成', duration: 2000 })
+      ElMessage.success({ message: data.message || '下单成功，去「我的订单」完成付款', duration: 2500 })
       buyVisible.value = false
       loadGoods()
     } else {

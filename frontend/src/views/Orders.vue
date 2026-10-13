@@ -10,10 +10,21 @@ const loading = ref(false)
 const user = JSON.parse(localStorage.getItem('user') || 'null')
 
 const statusTag = {
+  '待付款': 'danger',
   '待发货': 'warning',
   '已发货': 'primary',
   '已完成': 'success',
-  '已退款': 'info'
+  '退款中': 'info',
+  '已退款': 'info',
+  '已取消': 'info'
+}
+
+// 资金状态：担保交易的关键——钱在哪
+const escrowTag = {
+  '未付款': 'info',
+  '平台托管': 'warning',
+  '已放款': 'success',
+  '已退回': 'info'
 }
 
 function getImageUrl(path) {
@@ -39,38 +50,43 @@ async function loadOrders() {
   }
 }
 
-async function refundOrder(order) {
-  try {
-    await ElMessageBox.confirm('确定要申请退款吗？退款后商品将重新上架。', '申请退款', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await request.put(`/orders/${order.id}/status`, { status: '已退款' })
-    if (data.success) {
-      ElMessage.success('退款成功，商品已重新上架')
-      loadOrders()
-    }
-  } catch (e) {
-    ElMessage.error('退款失败，请检查后端服务')
-  }
+// 我能对这笔订单做的操作：由后端状态机给出 nextActions，再按身份过滤
+function myActions(order) {
+  const role = order.buyerId === user.id ? 'buyer' : 'seller'
+  return (order.nextActions || []).filter(a => a.actor === role)
 }
 
-// B3 确认收货：只有「已完成」的订单才能评价，所以这里补上状态流转入口
-async function confirmReceive(order) {
+// 各流转的确认文案：担保交易的关键节点要说清楚钱去哪了
+const ACTION_TIPS = {
+  '待发货': '确认付款吗？付款后货款由平台托管，等你确认收货才会打给卖家。',
+  '已取消': '确定取消这笔订单吗？商品会重新上架。',
+  '已发货': '确认已经发货了吗？',
+  '已完成': '确认已经收到宝贝了吗？确认后平台会把货款打给卖家。',
+  '退款中': '确定申请退款吗？',
+  '已退款': '同意买家的退款申请吗？货款将退回买家，商品重新上架。'
+}
+
+async function handleAction(order, action) {
   try {
-    await ElMessageBox.confirm('确认已经收到宝贝了吗？确认后订单完成，可以评价对方。', '确认收货', { type: 'info' })
+    await ElMessageBox.confirm(ACTION_TIPS[action.status] || `确定要「${action.label}」吗？`,
+      action.label, { type: 'info' })
   } catch {
     return
   }
   try {
-    const { data } = await request.put(`/orders/${order.id}/status`, { status: '已完成' })
+    const { data } = await request.put(`/orders/${order.id}/status`, {
+      status: action.status,
+      userId: user.id
+    })
     if (data.success) {
-      ElMessage.success('订单已完成，去评价一下卖家吧')
-      loadOrders()
+      ElMessage.success(data.message || '操作成功')
+      await loadOrders()
+      loadReviewedFlags()
+    } else {
+      ElMessage.error(data.message || '操作失败')
     }
   } catch (e) {
-    ElMessage.error('操作失败，请检查后端服务')
+    ElMessage.error(e.response?.data?.message || '操作失败，请检查后端服务')
   }
 }
 
@@ -150,7 +166,12 @@ onMounted(async () => {
       <el-card v-for="order in orders" :key="order.id" class="order-card" shadow="never">
         <div class="order-header">
           <span class="order-id">订单号：{{ order.id }}</span>
-          <el-tag :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+          <div class="order-tags">
+            <el-tag size="small" :type="escrowTag[order.escrowStatus] || 'info'">
+              资金：{{ order.escrowStatus || '—' }}
+            </el-tag>
+            <el-tag :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+          </div>
         </div>
         <div class="order-content">
           <img class="order-img" :src="getImageUrl(order.goodsImage)" alt="商品">
@@ -166,10 +187,12 @@ onMounted(async () => {
         <div class="order-footer">
           <span class="order-time">下单时间：{{ formatTime(order.createdAt) }}</span>
           <div class="order-actions">
-            <el-button v-if="order.status === '待发货'" size="small" type="danger" plain
-              @click="refundOrder(order)">申请退款</el-button>
-            <el-button v-if="order.status === '已发货'" size="small" type="primary"
-              @click="confirmReceive(order)">确认收货</el-button>
+            <!-- 状态机给什么按钮就渲染什么：非法操作在界面上根本不会出现 -->
+            <el-button v-for="a in myActions(order)" :key="a.status" size="small"
+              :type="a.status === '已取消' || a.status === '退款中' ? 'danger' : 'primary'"
+              :plain="a.status === '已取消' || a.status === '退款中'"
+              @click="handleAction(order, a)">{{ a.label }}</el-button>
+            <span v-if="order.status === '退款中'" class="order-hint">等待卖家处理退款</span>
             <template v-if="order.status === '已完成'">
               <el-tag v-if="reviewedOrders.has(order.id)" size="small" type="success">已评价</el-tag>
               <el-button v-else size="small" type="primary" plain @click="openReview(order)">
@@ -215,6 +238,8 @@ onMounted(async () => {
   border-bottom: 1px solid #f0f0f0;
 }
 .order-id { font-size: 13px; color: #666; }
+.order-tags { display: flex; align-items: center; gap: 6px; }
+.order-hint { font-size: 12px; color: #999; }
 .order-content { display: flex; gap: 14px; }
 .order-img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; background: #eee; }
 .order-title { font-weight: bold; margin-bottom: 6px; }

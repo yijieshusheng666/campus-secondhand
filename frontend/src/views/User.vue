@@ -91,10 +91,13 @@ async function submitVerify() {
 }
 
 const statusTag = {
+  '待付款': 'danger',
   '待发货': 'warning',
   '已发货': 'primary',
   '已完成': 'success',
-  '已退款': 'info'
+  '退款中': 'info',
+  '已退款': 'info',
+  '已取消': 'info'
 }
 
 function getImageUrl(path) {
@@ -211,20 +214,36 @@ async function loadSales() {
   }
 }
 
-async function shipOrder(order) {
+// 卖家能做的操作同样来自后端状态机，前端不重复维护状态规则
+function sellerActions(order) {
+  return (order.nextActions || []).filter(a => a.actor === 'seller')
+}
+
+const SALE_TIPS = {
+  '已发货': '确认已经发货了吗？',
+  '已退款': '同意买家的退款申请吗？货款将退回买家，商品重新上架。'
+}
+
+async function handleSaleAction(order, action) {
   try {
-    await ElMessageBox.confirm('确定将该订单标记为已发货吗？', '标记发货', { type: 'info' })
+    await ElMessageBox.confirm(SALE_TIPS[action.status] || `确定要「${action.label}」吗？`,
+      action.label, { type: 'info' })
   } catch {
     return
   }
   try {
-    const { data } = await request.put(`/orders/${order.id}/status`, { status: '已发货' })
+    const { data } = await request.put(`/orders/${order.id}/status`, {
+      status: action.status,
+      userId: user.value.id
+    })
     if (data.success) {
-      ElMessage.success('已标记为发货')
+      ElMessage.success(data.message || '操作成功')
       loadSales()
+    } else {
+      ElMessage.error(data.message || '操作失败')
     }
   } catch (e) {
-    ElMessage.error('操作失败，请检查后端服务')
+    ElMessage.error(e.response?.data?.message || '操作失败，请检查后端服务')
   }
 }
 
@@ -368,14 +387,19 @@ onMounted(() => {
         <div v-for="order in sales" :key="order.id" class="sale-row">
           <div class="sale-header">
             <span class="sale-buyer">买家：{{ order.buyerName }}</span>
-            <el-tag size="small" :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+            <div class="sale-tags">
+              <el-tag size="small" type="warning">资金：{{ order.escrowStatus || '—' }}</el-tag>
+              <el-tag size="small" :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+            </div>
           </div>
           <div class="sale-line">商品：{{ order.goodsTitle }}</div>
           <div class="sale-price">¥{{ order.goodsPrice }}</div>
           <div class="sale-line">收货人：{{ order.receiver }} {{ order.phone }} / {{ order.address }}</div>
           <div class="sale-time">下单时间：{{ formatTime(order.createdAt) }}</div>
-          <div class="sale-actions" v-if="order.status === '待发货'">
-            <el-button size="small" type="primary" @click="shipOrder(order)">标记发货</el-button>
+          <div class="sale-actions" v-if="sellerActions(order).length">
+            <el-button v-for="a in sellerActions(order)" :key="a.status" size="small"
+              :type="a.status === '已退款' ? 'danger' : 'primary'" :plain="a.status === '已退款'"
+              @click="handleSaleAction(order, a)">{{ a.label }}</el-button>
           </div>
         </div>
       </el-card>
@@ -457,6 +481,7 @@ onMounted(() => {
 .review-from { font-size: 13px; font-weight: 600; color: var(--ink-color); }
 .review-text { font-size: 13px; color: #555; line-height: 1.6; margin: 4px 0; }
 .review-sub { font-size: 11px; color: #bbb; }
+.sale-tags { display: flex; align-items: center; gap: 6px; }
 .user-info { text-align: center; cursor: default; }
 .user-avatar { background: #ffd21e; color: #23201a; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
 .stuid { color: #999; font-size: 13px; margin-top: 4px; }

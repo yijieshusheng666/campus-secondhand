@@ -1,5 +1,7 @@
 package com.example.demo.controller;
 
+import java.time.LocalDateTime;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -20,6 +22,7 @@ import com.example.demo.entity.User;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.OrderRepository;
 import com.example.demo.repository.UserRepository;
+import com.example.demo.service.OrderStateMachine;
 
 @RestController
 @RequestMapping("/api/orders")
@@ -73,7 +76,13 @@ public class OrderController {
         goods.setStatus("已售");
         goodsRepository.save(goods);
 
-        return ResponseEntity.ok(Map.of("success", true, "orderId", order.getId(), "message", "下单成功"));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("orderId", order.getId());
+        result.put("status", order.getStatus());
+        result.put("escrowStatus", order.getEscrowStatus());
+        result.put("message", "下单成功，请完成付款，货款将由平台托管");
+        return ResponseEntity.ok(result);
     }
 
     // 查询订单：role=buyer 我买到的，role=seller 我卖出的
@@ -85,26 +94,95 @@ public class OrderController {
         return orderRepository.findByBuyerIdOrderByCreatedAtDesc(userId);
     }
 
-    // 更新订单状态（发货 / 退款等），退款时商品重新上架
+    /**
+     * 更新订单状态。所有流转都必须通过担保交易状态机校验：
+     * 1) 状态必须存在；2) 流转必须合法；3) 操作人必须是该环节的合法一方。
+     * 退款或取消后商品自动重新上架。
+     */
     @PutMapping("/{id}/status")
-    public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, String> body) {
+    public ResponseEntity<?> updateStatus(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Order order = orderRepository.findById(id).orElse(null);
         if (order == null) {
             return ResponseEntity.notFound().build();
         }
-        String status = body.get("status");
-        if (status == null || status.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "订单状态不能为空"));
+
+        String target = text(body, "status");
+        if (target.isBlank()) {
+            return ResponseEntity.badRequest().body(fail("订单状态不能为空"));
         }
-        order.setStatus(status);
+        if (!OrderStateMachine.isKnown(target)) {
+            return ResponseEntity.badRequest().body(fail("未知的订单状态：" + target));
+        }
+
+        String current = order.getStatus() == null ? OrderStateMachine.PENDING_PAY : order.getStatus();
+        if (!OrderStateMachine.canTransfer(current, target)) {
+            return ResponseEntity.badRequest().body(fail(
+                    "不能从「" + current + "」直接变成「" + target + "」。"
+                            + OrderStateMachine.describeNext(current)));
+        }
+
+        Long actorId = longOf(body, "userId");
+        if (actorId == null) {
+            return ResponseEntity.badRequest().body(fail("缺少操作人 userId"));
+        }
+        String required = OrderStateMachine.actorOf(current, target);
+        if (OrderStateMachine.ACTOR_BUYER.equals(required) && !actorId.equals(order.getBuyerId())) {
+            return ResponseEntity.badRequest().body(fail("该操作只能由买家发起"));
+        }
+        if (OrderStateMachine.ACTOR_SELLER.equals(required) && !actorId.equals(order.getSellerId())) {
+            return ResponseEntity.badRequest().body(fail("该操作只能由卖家发起"));
+        }
+
+        order.setStatus(target);
+        order.setEscrowStatus(OrderStateMachine.escrowOf(target));
+        LocalDateTime now = LocalDateTime.now();
+        if (OrderStateMachine.PAID.equals(target)) {
+            order.setPaidAt(now);        // 付款：货款进入平台托管
+        }
+        if (OrderStateMachine.FINISHED.equals(target)) {
+            order.setSettledAt(now);     // 确认收货：平台放款给卖家，担保结束
+        }
         orderRepository.save(order);
 
-        if ("已退款".equals(status)) {
+        // 订单退款或取消后，商品重新上架
+        if (OrderStateMachine.REFUNDED.equals(target) || OrderStateMachine.CANCELLED.equals(target)) {
             goodsRepository.findById(order.getGoodsId()).ifPresent(g -> {
-                g.setStatus("在售");
-                goodsRepository.save(g);
+                if (!"在售".equals(g.getStatus())) {
+                    g.setStatus("在售");
+                    goodsRepository.save(g);
+                }
             });
         }
-        return ResponseEntity.ok(Map.of("success", true, "message", "订单状态已更新"));
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("message", "订单状态已更新为「" + target + "」");
+        result.put("status", target);
+        result.put("escrowStatus", order.getEscrowStatus());
+        return ResponseEntity.ok(result);
+    }
+
+    private String text(Map<String, Object> body, String key) {
+        Object value = body == null ? null : body.get(key);
+        return value == null ? "" : value.toString().trim();
+    }
+
+    private Long longOf(Map<String, Object> body, String key) {
+        String value = text(body, key);
+        if (value.isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.valueOf(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private Map<String, Object> fail(String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", false);
+        result.put("message", message);
+        return result;
     }
 }
