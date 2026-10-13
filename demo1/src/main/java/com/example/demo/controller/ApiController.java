@@ -225,6 +225,8 @@ public class ApiController {
         result.put("realNameMasked", maskName(user.getRealName()));
         // B3：信用分与评价概览，供商品详情展示卖家信誉
         result.putAll(creditService.summaryOf(user.getId()));
+        // B4：管理端入口判断用（user / admin）
+        result.put("role", user.getRole());
         return ResponseEntity.ok(result);
     }
 

@@ -97,7 +97,8 @@ const statusTag = {
   '已完成': 'success',
   '退款中': 'info',
   '已退款': 'info',
-  '已取消': 'info'
+  '已取消': 'info',
+  '仲裁中': 'warning'
 }
 
 function getImageUrl(path) {
@@ -219,15 +220,17 @@ function sellerActions(order) {
   return (order.nextActions || []).filter(a => a.actor === 'seller')
 }
 
+// 按操作名给文案：同一个目标状态可能对应不同动作（标记发货 / 拒绝退款都指向「已发货」）
 const SALE_TIPS = {
-  '已发货': '确认已经发货了吗？',
-  '已退款': '同意买家的退款申请吗？货款将退回买家，商品重新上架。'
+  '标记发货': '确认已经发货了吗？',
+  '同意退款': '同意买家的退款申请吗？货款将退回买家，商品重新上架。',
+  '拒绝退款': '拒绝后订单退回「已发货」，买家不服可以申请平台介入。确定拒绝吗？'
 }
 
 async function handleSaleAction(order, action) {
   try {
-    await ElMessageBox.confirm(SALE_TIPS[action.status] || `确定要「${action.label}」吗？`,
-      action.label, { type: 'info' })
+    await ElMessageBox.confirm(SALE_TIPS[action.label] || `确定要「${action.label}」吗？`,
+      action.label, { type: action.label === '拒绝退款' ? 'warning' : 'info' })
   } catch {
     return
   }

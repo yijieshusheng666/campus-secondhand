@@ -33,6 +33,8 @@ public final class OrderStateMachine {
     public static final String REFUNDING = "退款中";
     public static final String REFUNDED = "已退款";
     public static final String CANCELLED = "已取消";
+    /** B4 纠纷仲裁中：买卖双方谈不拢，货款继续锁在平台等判定 */
+    public static final String DISPUTED = "仲裁中";
 
     // ---- 资金状态 ----
     public static final String ESCROW_UNPAID = "未付款";
@@ -43,6 +45,8 @@ public final class OrderStateMachine {
     // ---- 操作方 ----
     public static final String ACTOR_BUYER = "buyer";
     public static final String ACTOR_SELLER = "seller";
+    /** B4：平台管理员，纠纷仲裁的唯一裁决方 */
+    public static final String ACTOR_ADMIN = "admin";
 
     private static final Map<String, Set<String>> TRANSITIONS;
     private static final Map<String, String> ESCROW_OF;
@@ -53,8 +57,11 @@ public final class OrderStateMachine {
         Map<String, Set<String>> transitions = new LinkedHashMap<>();
         transitions.put(PENDING_PAY, new java.util.LinkedHashSet<>(List.of(PAID, CANCELLED)));
         transitions.put(PAID, new java.util.LinkedHashSet<>(List.of(SHIPPED, REFUNDING)));
-        transitions.put(SHIPPED, new java.util.LinkedHashSet<>(List.of(FINISHED, REFUNDING)));
-        transitions.put(REFUNDING, new java.util.LinkedHashSet<>(List.of(REFUNDED)));
+        transitions.put(SHIPPED, new java.util.LinkedHashSet<>(List.of(FINISHED, REFUNDING, DISPUTED)));
+        // 卖家同意退款 -> 已退款；卖家拒绝退款 -> 退回已发货，买家不服可申请平台介入
+        transitions.put(REFUNDING, new java.util.LinkedHashSet<>(List.of(REFUNDED, SHIPPED)));
+        // 平台裁决只有两种结局：支持买家退款，或驳回诉求、视为交易完成并放款
+        transitions.put(DISPUTED, new java.util.LinkedHashSet<>(List.of(REFUNDED, FINISHED)));
         // 终态：无后继
         transitions.put(FINISHED, new java.util.LinkedHashSet<>());
         transitions.put(REFUNDED, new java.util.LinkedHashSet<>());
@@ -66,6 +73,8 @@ public final class OrderStateMachine {
         escrow.put(PAID, ESCROW_HELD);
         escrow.put(SHIPPED, ESCROW_HELD);
         escrow.put(REFUNDING, ESCROW_HELD);
+        // 争议期间货款继续冻结在平台，谁也不能动
+        escrow.put(DISPUTED, ESCROW_HELD);
         escrow.put(FINISHED, ESCROW_RELEASED);
         escrow.put(REFUNDED, ESCROW_RETURNED);
         escrow.put(CANCELLED, ESCROW_UNPAID);
@@ -78,7 +87,11 @@ public final class OrderStateMachine {
         actors.put(key(PAID, REFUNDING), ACTOR_BUYER);
         actors.put(key(SHIPPED, FINISHED), ACTOR_BUYER);
         actors.put(key(SHIPPED, REFUNDING), ACTOR_BUYER);
+        actors.put(key(SHIPPED, DISPUTED), ACTOR_BUYER);
         actors.put(key(REFUNDING, REFUNDED), ACTOR_SELLER);
+        actors.put(key(REFUNDING, SHIPPED), ACTOR_SELLER);
+        actors.put(key(DISPUTED, REFUNDED), ACTOR_ADMIN);
+        actors.put(key(DISPUTED, FINISHED), ACTOR_ADMIN);
         ACTOR_OF = actors;
 
         Map<String, String> labels = new LinkedHashMap<>();
@@ -88,7 +101,11 @@ public final class OrderStateMachine {
         labels.put(key(PAID, REFUNDING), "申请退款");
         labels.put(key(SHIPPED, FINISHED), "确认收货");
         labels.put(key(SHIPPED, REFUNDING), "申请退款");
+        labels.put(key(SHIPPED, DISPUTED), "申请平台介入");
         labels.put(key(REFUNDING, REFUNDED), "同意退款");
+        labels.put(key(REFUNDING, SHIPPED), "拒绝退款");
+        labels.put(key(DISPUTED, REFUNDED), "裁定：支持买家退款");
+        labels.put(key(DISPUTED, FINISHED), "裁定：驳回诉求并放款");
         LABEL_OF = labels;
     }
 

@@ -60,6 +60,7 @@ public class DataInitializer implements CommandLineRunner {
             user1.setUsername("管理员");
             user1.setStuid("admin");
             user1.setPassword("admin123");
+            user1.setRole("admin");   // B4：平台管理员，负责纠纷仲裁
             user1 = userRepository.save(user1);
             logger.info("初始化用户：{}，ID：{}", user1.getUsername(), user1.getId());
 
@@ -67,11 +68,17 @@ public class DataInitializer implements CommandLineRunner {
             user2.setUsername("测试用户");
             user2.setStuid("test");
             user2.setPassword("test123");
+            user2.setRole("user");
             user2 = userRepository.save(user2);
             logger.info("初始化用户：{}，ID：{}", user2.getUsername(), user2.getId());
         } else {
             user1 = userRepository.findByStuid("admin");
             user2 = userRepository.findByStuid("test");
+            // 老库没有 role 字段值，启动时补一次，保证管理端能进去
+            if (user1 != null && !user1.isAdmin()) {
+                user1.setRole("admin");
+                userRepository.save(user1);
+            }
         }
 
         // 初始化商品数据（含图片）

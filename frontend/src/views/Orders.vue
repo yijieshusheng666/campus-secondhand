@@ -16,7 +16,8 @@ const statusTag = {
   '已完成': 'success',
   '退款中': 'info',
   '已退款': 'info',
-  '已取消': 'info'
+  '已取消': 'info',
+  '仲裁中': 'warning'
 }
 
 // 资金状态：担保交易的关键——钱在哪
@@ -66,7 +67,49 @@ const ACTION_TIPS = {
   '已退款': '同意买家的退款申请吗？货款将退回买家，商品重新上架。'
 }
 
+// —— B4 申请平台介入：需要填理由，所以不走通用的状态流转，单独走纠纷接口 ——
+const disputeVisible = ref(false)
+const disputeOrder = ref(null)
+const disputeForm = ref({ reason: '货不对板', detail: '' })
+const disputeSubmitting = ref(false)
+const DISPUTE_REASONS = ['货不对板', '未收到货', '卖家拒绝退款', '其他']
+
+function openDispute(order) {
+  disputeOrder.value = order
+  disputeForm.value = { reason: '货不对板', detail: '' }
+  disputeVisible.value = true
+}
+
+async function submitDispute() {
+  disputeSubmitting.value = true
+  try {
+    const { data } = await request.post('/disputes', {
+      orderId: disputeOrder.value.id,
+      initiatorId: user.id,
+      reason: disputeForm.value.reason,
+      detail: disputeForm.value.detail
+    })
+    if (data.success) {
+      ElMessage.success(data.message || '已提交平台介入')
+      disputeVisible.value = false
+      await loadOrders()
+      loadReviewedFlags()
+    } else {
+      ElMessage.error(data.message || '提交失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '提交失败，请检查后端服务')
+  } finally {
+    disputeSubmitting.value = false
+  }
+}
+
 async function handleAction(order, action) {
+  // 申请平台介入要带理由，交给纠纷弹窗处理
+  if (action.status === '仲裁中') {
+    openDispute(order)
+    return
+  }
   try {
     await ElMessageBox.confirm(ACTION_TIPS[action.status] || `确定要「${action.label}」吗？`,
       action.label, { type: 'info' })
@@ -193,6 +236,7 @@ onMounted(async () => {
               :plain="a.status === '已取消' || a.status === '退款中'"
               @click="handleAction(order, a)">{{ a.label }}</el-button>
             <span v-if="order.status === '退款中'" class="order-hint">等待卖家处理退款</span>
+            <span v-if="order.status === '仲裁中'" class="order-hint">平台处理中，货款已冻结</span>
             <template v-if="order.status === '已完成'">
               <el-tag v-if="reviewedOrders.has(order.id)" size="small" type="success">已评价</el-tag>
               <el-button v-else size="small" type="primary" plain @click="openReview(order)">
@@ -220,6 +264,28 @@ onMounted(async () => {
       <template #footer>
         <el-button @click="reviewVisible = false">取消</el-button>
         <el-button type="primary" :loading="submitting" @click="submitReview">提交评价</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- B4 申请平台介入 -->
+    <el-dialog v-model="disputeVisible" title="申请平台介入" width="440px">
+      <div class="dispute-body">
+        <div class="dispute-goods">{{ disputeOrder?.goodsTitle }}</div>
+        <div class="dispute-row">
+          <span class="dispute-label">申请理由</span>
+          <el-select v-model="disputeForm.reason" style="flex: 1">
+            <el-option v-for="r in DISPUTE_REASONS" :key="r" :label="r" :value="r" />
+          </el-select>
+        </div>
+        <el-input v-model="disputeForm.detail" type="textarea" :rows="3" maxlength="500" show-word-limit
+          placeholder="说明一下具体情况，比如货物与描述不符的地方（选填）" />
+        <p class="dispute-note">
+          提交后订单进入「仲裁中」，货款冻结在平台，由平台管理员裁定。
+        </p>
+      </div>
+      <template #footer>
+        <el-button @click="disputeVisible = false">取消</el-button>
+        <el-button type="primary" :loading="disputeSubmitting" @click="submitDispute">提交申请</el-button>
       </template>
     </el-dialog>
   </div>
@@ -264,4 +330,8 @@ onMounted(async () => {
 .review-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .review-label { color: #888; font-size: 13px; width: 64px; flex-shrink: 0; }
 .review-note { font-size: 12px; color: #bbb; margin: 8px 0 0; }
+.dispute-goods { font-weight: 600; margin-bottom: 12px; color: var(--ink-color); }
+.dispute-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
+.dispute-label { color: #888; font-size: 13px; width: 64px; flex-shrink: 0; }
+.dispute-note { font-size: 12px; color: #bbb; margin: 8px 0 0; line-height: 1.6; }
 </style>

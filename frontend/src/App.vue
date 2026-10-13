@@ -1,7 +1,8 @@
 <script setup>
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import request from './api'
 import ChatPanel from './components/ChatPanel.vue'
 
 const route = useRoute()
@@ -16,6 +17,27 @@ const navs = [
 ]
 
 const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
+
+// B4：管理端入口只对 role=admin 的账号显示
+const visibleNavs = computed(() => (user.value?.role === 'admin'
+  ? [...navs, { path: '/admin', label: '管理端' }]
+  : navs))
+
+// 兼容改动前登录的老会话：localStorage 里可能没有 role，补查一次并回写
+async function syncUserRole() {
+  const cached = JSON.parse(localStorage.getItem('user') || 'null')
+  if (!cached || cached.role || !cached.id) return
+  try {
+    const { data } = await request.get(`/users/${cached.id}`)
+    if (data?.role) {
+      cached.role = data.role
+      localStorage.setItem('user', JSON.stringify(cached))
+      user.value = cached
+    }
+  } catch (e) {
+    // 查不到就按普通用户处理
+  }
+}
 
 // 路由切换时刷新登录状态（登录/退出后界面同步）
 watch(() => route.path, () => {
@@ -46,7 +68,10 @@ function onDocumentClick(e) {
   }
 }
 
-onMounted(() => document.addEventListener('click', onDocumentClick, true))
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick, true)
+  syncUserRole()
+})
 onUnmounted(() => document.removeEventListener('click', onDocumentClick, true))
 
 function onGoHome() {
@@ -75,7 +100,7 @@ function onLogout() {
         </div>
 
         <nav class="nav-links">
-          <router-link v-for="n in navs" :key="n.path" :to="n.path" class="nav-link"
+          <router-link v-for="n in visibleNavs" :key="n.path" :to="n.path" class="nav-link"
             :class="{ active: route.path === n.path }">
             {{ n.label }}
           </router-link>

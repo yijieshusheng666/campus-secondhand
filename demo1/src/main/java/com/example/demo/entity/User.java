@@ -23,6 +23,9 @@ public class User {
     private Boolean verified;
     private LocalDateTime verifiedAt;
 
+    // B4 纠纷仲裁：只有 role = admin 的账号可以裁决纠纷
+    private String role;
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -84,6 +87,19 @@ public class User {
 
     public void setVerifiedAt(LocalDateTime verifiedAt) {
         this.verifiedAt = verifiedAt;
+    }
+
+    /** 老数据 role 为 null，一律按普通用户处理。 */
+    public String getRole() {
+        return role == null ? "user" : role;
+    }
+
+    public void setRole(String role) {
+        this.role = role;
+    }
+
+    public boolean isAdmin() {
+        return "admin".equals(getRole());
     }
 
     public LocalDateTime getCreatedAt() {
