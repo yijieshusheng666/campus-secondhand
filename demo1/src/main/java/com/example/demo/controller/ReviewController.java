@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -120,29 +121,21 @@ public class ReviewController {
         return ResponseEntity.ok(result);
     }
 
-    // 我收到的评价
+    // 我收到的评价 + 我发出的评价 + 信用概览
     @GetMapping
     public ResponseEntity<?> list(@RequestParam Long userId) {
-        List<Map<String, Object>> items = new ArrayList<>();
+        List<Map<String, Object>> received = new ArrayList<>();
         for (Review review : reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId)) {
-            Map<String, Object> item = new LinkedHashMap<>();
-            item.put("id", review.getId());
-            item.put("orderId", review.getOrderId());
-            item.put("score", review.getScore());
-            item.put("content", review.getContent());
-            item.put("role", review.getRole());
-            item.put("createdAt", review.getCreatedAt());
-
-            User reviewer = userRepository.findById(review.getReviewerId()).orElse(null);
-            item.put("reviewerName", reviewer != null ? reviewer.getUsername() : "匿名同学");
-
-            Goods goods = goodsRepository.findById(review.getGoodsId()).orElse(null);
-            item.put("goodsTitle", goods != null ? goods.getTitle() : "");
-            items.add(item);
+            received.add(view(review));
+        }
+        List<Map<String, Object>> sent = new ArrayList<>();
+        for (Review review : reviewRepository.findByReviewerIdOrderByCreatedAtDesc(userId)) {
+            sent.add(view(review));
         }
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
-        result.put("data", items);
+        result.put("data", received);
+        result.put("sent", sent);
         result.put("credit", creditService.summaryOf(userId));
         return ResponseEntity.ok(result);
     }
@@ -156,6 +149,36 @@ public class ReviewController {
         return ResponseEntity.ok(result);
     }
 
+    // 某件商品收到的评价 + 评分汇总（商品详情页展示用）
+    @GetMapping("/goods/{goodsId}")
+    public ResponseEntity<?> byGoods(@PathVariable Long goodsId) {
+        List<Review> reviews = reviewRepository.findByGoodsIdOrderByCreatedAtDesc(goodsId);
+
+        double sum = 0;
+        int buyers = 0;
+        int sellers = 0;
+        for (Review review : reviews) {
+            sum += review.getScore() == null ? 0 : review.getScore();
+            if ("buyer".equals(review.getRole())) {
+                buyers++;
+            } else {
+                sellers++;
+            }
+        }
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("count", reviews.size());
+        summary.put("avgScore", reviews.isEmpty() ? 0 : Math.round(sum / reviews.size() * 10) / 10.0);
+        summary.put("fromBuyers", buyers);      // 买家评卖家
+        summary.put("fromSellers", sellers);    // 卖家评买家
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("summary", summary);
+        result.put("data", viewList(reviews));
+        return ResponseEntity.ok(result);
+    }
+
     // 信用分
     @GetMapping("/credit")
     public ResponseEntity<?> credit(@RequestParam Long userId) {
@@ -163,6 +186,38 @@ public class ReviewController {
         result.put("success", true);
         result.putAll(creditService.summaryOf(userId));
         return ResponseEntity.ok(result);
+    }
+
+    /** 组装一条评价：同时带上评价人和被评价人昵称，收到/发出两种列表都能复用。 */
+    private Map<String, Object> view(Review review) {
+        Map<String, Object> item = new LinkedHashMap<>();
+        item.put("id", review.getId());
+        item.put("orderId", review.getOrderId());
+        item.put("score", review.getScore());
+        item.put("content", review.getContent());
+        item.put("role", review.getRole());
+        item.put("createdAt", review.getCreatedAt());
+        item.put("reviewerId", review.getReviewerId());
+        item.put("revieweeId", review.getRevieweeId());
+        item.put("reviewerName", nameOf(review.getReviewerId()));
+        item.put("revieweeName", nameOf(review.getRevieweeId()));
+
+        Goods goods = goodsRepository.findById(review.getGoodsId()).orElse(null);
+        item.put("goodsTitle", goods != null ? goods.getTitle() : "");
+        return item;
+    }
+
+    private List<Map<String, Object>> viewList(List<Review> reviews) {
+        List<Map<String, Object>> items = new ArrayList<>();
+        for (Review review : reviews) {
+            items.add(view(review));
+        }
+        return items;
+    }
+
+    private String nameOf(Long userId) {
+        User user = userId == null ? null : userRepository.findById(userId).orElse(null);
+        return user != null ? user.getUsername() : "匿名同学";
     }
 
     private Integer parseScore(Object raw) {

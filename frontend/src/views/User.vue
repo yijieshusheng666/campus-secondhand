@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../api'
+import ReviewDialog from '../components/ReviewDialog.vue'
 
 const router = useRouter()
 const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
@@ -128,10 +129,27 @@ async function loadReviews() {
   try {
     const { data } = await request.get('/reviews', { params: { userId: user.value.id } })
     reviews.value = data.data || []
+    // 我发出的评价：用来判断某个已完成订单还能不能评价买家
+    reviewedOrderIds.value = new Set((data.sent || []).map(r => r.orderId))
     if (data.credit) credit.value = data.credit
   } catch (e) {
     // 评价加载失败不影响页面其他部分
   }
+}
+
+// —— 评价买家（卖家侧）：复用 ReviewDialog，只有文案不同 ——
+const saleReviewVisible = ref(false)
+const saleReviewOrder = ref(null)
+const reviewedOrderIds = ref(new Set())
+
+function openSaleReview(order) {
+  saleReviewOrder.value = order
+  saleReviewVisible.value = true
+}
+
+function onSaleReviewed() {
+  loadSales()
+  loadReviews()
 }
 
 function openVerifyDialog() {
@@ -532,7 +550,11 @@ onMounted(() => {
           <div class="sale-price">¥{{ order.goodsPrice }}</div>
           <div class="sale-line">收货人：{{ order.receiver }} {{ order.phone }} / {{ order.address }}</div>
           <div class="sale-time">下单时间：{{ formatTime(order.createdAt) }}</div>
-          <div class="sale-actions" v-if="sellerActions(order).length">
+          <div class="sale-actions" v-if="sellerActions(order).length || order.status === '已完成'">
+            <el-tag v-if="order.status === '已完成' && reviewedOrderIds.has(order.id)"
+              size="small" type="success">已评价买家</el-tag>
+            <el-button v-else-if="order.status === '已完成'" size="small" type="primary" plain
+              @click="openSaleReview(order)">评价买家</el-button>
             <el-button v-for="a in sellerActions(order)" :key="a.status" size="small"
               :type="a.status === '已退款' ? 'danger' : 'primary'" :plain="a.status === '已退款'"
               @click="handleSaleAction(order, a)">{{ a.label }}</el-button>
@@ -592,6 +614,10 @@ onMounted(() => {
       <el-button type="primary" :loading="verifying" @click="submitVerify">提交认证</el-button>
     </template>
   </el-dialog>
+
+  <!-- B3 评价买家：与 Orders.vue 共用同一个 ReviewDialog 组件 -->
+  <ReviewDialog v-model="saleReviewVisible" :order="saleReviewOrder" :user-id="user.id"
+    target="买家" @submitted="onSaleReviewed" />
 </template>
 
 <style scoped>

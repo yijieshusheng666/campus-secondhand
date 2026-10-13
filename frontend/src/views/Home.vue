@@ -43,6 +43,27 @@ function getImageUrl(path) {
   return path.startsWith('http') ? path : path
 }
 
+function formatTime(t) {
+  if (!t) return ''
+  return String(t).replace('T', ' ').slice(0, 16)
+}
+
+// —— B3 商品评价：详情页展示这件宝贝收到的评分与评价 ——
+const EMPTY_REVIEW_SUMMARY = { count: 0, avgScore: 0, fromBuyers: 0, fromSellers: 0 }
+const goodsReviews = ref({ summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] })
+
+async function loadGoodsReviews(goodsId) {
+  try {
+    const { data } = await request.get(`/reviews/goods/${goodsId}`)
+    goodsReviews.value = {
+      summary: data.summary || { ...EMPTY_REVIEW_SUMMARY },
+      data: data.data || []
+    }
+  } catch (e) {
+    goodsReviews.value = { summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] }
+  }
+}
+
 async function loadGoods() {
   loading.value = true
   try {
@@ -111,6 +132,7 @@ async function showDetail(goods) {
   sellerName.value = ''
   sellerInfo.value = null
   groupBuys.value = []
+  goodsReviews.value = { summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] }
   try {
     const { data } = await request.get(`/users/${goods.userId}`)
     sellerName.value = data.username
@@ -121,6 +143,8 @@ async function showDetail(goods) {
   }
   // C3：这件宝贝上正在进行的宿舍楼拼单
   loadGroupBuys(goods.id)
+  // B3：这件宝贝收到的评价
+  loadGoodsReviews(goods.id)
 }
 
 // —— C3 宿舍楼拼单 ——
@@ -466,6 +490,42 @@ async function openFromQuery() {
             </div>
             <el-button size="small" class="gb-create" @click="openGroupBuy">＋ 发起拼单</el-button>
           </el-collapse-item>
+
+          <!-- B3 商品评价：买家评卖家 + 卖家评买家，双向可见 -->
+          <el-collapse-item name="review">
+            <template #title>
+              <span class="extra-title">💬 商品评价</span>
+              <span v-if="goodsReviews.summary.count" class="extra-badge score">
+                ★{{ goodsReviews.summary.avgScore }} · {{ goodsReviews.summary.count }} 条
+              </span>
+              <span v-else class="extra-badge">暂无评价</span>
+            </template>
+
+            <el-empty v-if="goodsReviews.data.length === 0"
+              description="这件宝贝还没有人评价，交易完成后可在这里看到评价" :image-size="50" />
+
+            <div v-for="r in goodsReviews.data" :key="r.id" class="rv-item">
+              <div class="rv-head">
+                <span class="rv-name">{{ r.reviewerName }}</span>
+                <el-tag size="small" :type="r.role === 'buyer' ? 'success' : 'warning'">
+                  {{ r.role === 'buyer' ? '买家评价卖家' : '卖家评价买家' }}
+                </el-tag>
+                <el-rate :model-value="r.score" disabled size="small" />
+              </div>
+              <div class="rv-text">{{ r.content || '这位同学没有填写评价内容' }}</div>
+              <div class="rv-time">{{ formatTime(r.createdAt) }}</div>
+            </div>
+
+            <div class="rv-foot">
+              <span v-if="goodsReviews.summary.count" class="rv-stat">
+                买家评价 {{ goodsReviews.summary.fromBuyers }} 条 ·
+                卖家评价 {{ goodsReviews.summary.fromSellers }} 条
+              </span>
+              <el-button size="small" type="primary" plain @click="router.push('/orders')">
+                去我的订单评价
+              </el-button>
+            </div>
+          </el-collapse-item>
         </el-collapse>
       </div>
     </div>
@@ -622,6 +682,25 @@ async function openFromQuery() {
 .gb-meta { font-size: 12px; color: #888; margin: 5px 0 3px; }
 .gb-members { font-size: 12px; color: #aaa; margin-bottom: 8px; }
 .gb-create { margin-top: 4px; }
+
+/* B3 商品评价 */
+.rv-item { padding: 10px 0; border-top: 1px solid #f0f0f0; }
+.rv-item:first-of-type { border-top: none; }
+.rv-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.rv-name { font-size: 13px; font-weight: 600; color: var(--ink-color); }
+.rv-text { font-size: 13px; color: #555; line-height: 1.6; margin: 6px 0 4px; }
+.rv-time { font-size: 11px; color: #bbb; }
+.rv-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #eee;
+}
+.rv-stat { font-size: 12px; color: #999; }
+.extra-badge.score { background: #fff3c2; color: #8a6100; }
 .gb-form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .gb-label { width: 72px; font-size: 13px; color: #888; flex-shrink: 0; }
 .gb-note { font-size: 12px; color: #bbb; line-height: 1.6; margin: 4px 0 0; }

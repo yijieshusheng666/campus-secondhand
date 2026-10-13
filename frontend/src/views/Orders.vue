@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../api'
+import ReviewDialog from '../components/ReviewDialog.vue'
 
 const router = useRouter()
 const orders = ref([])
@@ -133,11 +134,9 @@ async function handleAction(order, action) {
   }
 }
 
-// —— B3 双向评价 ——
+// —— B3 双向评价：弹窗抽成共用组件（卖家侧在个人中心复用同一个） ——
 const reviewVisible = ref(false)
 const reviewOrder = ref(null)
-const reviewForm = ref({ score: 5, content: '' })
-const submitting = ref(false)
 const reviewedOrders = ref(new Set())
 
 async function loadReviewedFlags() {
@@ -158,34 +157,12 @@ async function loadReviewedFlags() {
 
 function openReview(order) {
   reviewOrder.value = order
-  reviewForm.value = { score: 5, content: '' }
   reviewVisible.value = true
 }
 
-async function submitReview() {
-  if (!reviewForm.value.score) {
-    ElMessage.warning('请先给个星级')
-    return
-  }
-  submitting.value = true
-  try {
-    const { data } = await request.post('/reviews', {
-      orderId: reviewOrder.value.id,
-      reviewerId: user.id,
-      score: reviewForm.value.score,
-      content: reviewForm.value.content
-    })
-    if (data.success) {
-      ElMessage.success(data.message || '评价已提交')
-      reviewedOrders.value = new Set([...reviewedOrders.value, reviewOrder.value.id])
-      reviewVisible.value = false
-    } else {
-      ElMessage.error(data.message || '评价失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '评价失败，请检查后端服务')
-  } finally {
-    submitting.value = false
+function onReviewed() {
+  if (reviewOrder.value) {
+    reviewedOrders.value = new Set([...reviewedOrders.value, reviewOrder.value.id])
   }
 }
 
@@ -248,24 +225,9 @@ onMounted(async () => {
       </el-card>
     </div>
 
-    <!-- B3 评价弹窗 -->
-    <el-dialog v-model="reviewVisible" title="评价这位卖家" width="420px">
-      <div class="review-body">
-        <div class="review-goods">{{ reviewOrder?.goodsTitle }}</div>
-        <div class="review-row">
-          <span class="review-label">交易体验</span>
-          <el-rate v-model="reviewForm.score" show-text
-            :texts="['很差', '较差', '一般', '满意', '非常满意']" />
-        </div>
-        <el-input v-model="reviewForm.content" type="textarea" :rows="3" maxlength="200" show-word-limit
-          placeholder="说说成色、沟通和发货速度吧（选填）" />
-        <p class="review-note">评价会累计到对方的信用分，请如实反馈。</p>
-      </div>
-      <template #footer>
-        <el-button @click="reviewVisible = false">取消</el-button>
-        <el-button type="primary" :loading="submitting" @click="submitReview">提交评价</el-button>
-      </template>
-    </el-dialog>
+    <!-- B3 评价卖家（共用组件） -->
+    <ReviewDialog v-model="reviewVisible" :order="reviewOrder" :user-id="user.id"
+      target="卖家" @submitted="onReviewed" />
 
     <!-- B4 申请平台介入 -->
     <el-dialog v-model="disputeVisible" title="申请平台介入" width="440px">
@@ -326,10 +288,6 @@ onMounted(async () => {
 }
 .order-time { font-size: 12px; color: #999; }
 .order-actions { display: flex; align-items: center; gap: 8px; }
-.review-goods { font-weight: 600; margin-bottom: 12px; color: var(--ink-color); }
-.review-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
-.review-label { color: #888; font-size: 13px; width: 64px; flex-shrink: 0; }
-.review-note { font-size: 12px; color: #bbb; margin: 8px 0 0; }
 .dispute-goods { font-weight: 600; margin-bottom: 12px; color: var(--ink-color); }
 .dispute-row { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .dispute-label { color: #888; font-size: 13px; width: 64px; flex-shrink: 0; }
