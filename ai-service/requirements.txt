@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic
+numpy
+httpx
+sentence-transformers
+jieba
+scikit-learn
