@@ -37,7 +37,8 @@ class KnowledgeBase:
     def search(self, question: str, top_k: int) -> list[dict]:
         """返回 [{id, title, snippet, score}]。"""
         vector = embedder.embed_texts([question])[0]
-        hits = self.store.search(FAQ_COLLECTION, vector, top_k, settings.sim_threshold)
+        threshold = settings.default_threshold(embedder.mode())
+        hits = self.store.search(FAQ_COLLECTION, vector, top_k, threshold)
 
         results = []
         for hit in hits:

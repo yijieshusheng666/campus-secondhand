@@ -46,10 +46,12 @@ def chat(req: ChatRequest):
 
 def _retrieve(question: str, top_k: int) -> list[dict]:
     """同时检索 FAQ 与在售商品，合并后按相似度降序取前 top_k。"""
+    mode = embedder.mode()
+    threshold = settings.default_threshold(mode)
     vector = embedder.embed_texts([question])[0]
 
-    faq_hits = store.search(FAQ_COLLECTION, vector, top_k, settings.sim_threshold)
-    goods_hits = store.search(GOODS_COLLECTION, vector, top_k, settings.sim_threshold)
+    faq_hits = store.search(FAQ_COLLECTION, vector, top_k, threshold)
+    goods_hits = store.search(GOODS_COLLECTION, vector, top_k, threshold)
 
     sources = []
     for hit in faq_hits:

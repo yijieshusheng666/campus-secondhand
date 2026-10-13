@@ -21,9 +21,52 @@
 | sentence-transformers 3.4.1 / torch 2.12.0 | 已安装 ✓ |
 | scikit-learn 1.3.0 | 已安装 ✓ |
 | pytest 8.3.5 | 已安装 ✓ |
-| jieba | **需安装** |
+| jieba | 已安装 ✓（本次任务装的） |
 | Docker | 未安装（本计划不使用） |
-| git 仓库 | **不存在**（见任务 0） |
+| git 仓库 | **已初始化**（任务 0 完成，首次提交 `17c417d`） |
+
+---
+
+## 实施记录（2026-10-13）
+
+状态：**任务 0-10 全部完成**，`ai-service/` 已落地，单测 28 个全通过，端到端验收 V1-V8 已在本机跑通。
+
+| 提交 | 内容 |
+|---|---|
+| `17c417d` | chore: 初始化版本控制（含 `.gitignore` 补全 `node_modules/`、`__pycache__/`、`ai-service/data/index/`、`.env`） |
+| `ba87adc` | feat(ai): AI 服务底座（向量化 / 向量存储 / 生成降级 / 知识库 / 接口层） |
+| `de9b357` | feat(ai): Java 侧语义搜索与索引重建接口 |
+
+| 验收项 | 结果 |
+|---|---|
+| 环境 | Python 3.11.9（系统解释器；文档所列 fastapi/uvicorn/numpy/httpx/sentence-transformers/torch/scikit-learn/pytest 均已存在），jieba 本次新装 |
+| V8 单测 | `python -m pytest tests/ -q` → **28 passed** |
+| V1 health | `{"status":"ok","embedding":{"mode":"tfidf","dim":512},"llm":{"mode":"extractive"},"index":{"count":27}}` |
+| V2 embed | dim=512，2 条文本各 512 维 |
+| V7 reindex | Java → FastAPI，`{"success":true,"indexed":27}`（27 件在售商品） |
+| V3 语义召回 | `{"mode":"tfidf","results":[{"goodsId":8,"score":0.3273}]}` → 命中「索尼 WH-1000XM5 头戴式耳机」 |
+| V6 Java 链路 | `/api/ai/search?keyword=降噪耳机` → `semantic:true`，返回 #8 索尼耳机；加 `category=图书教材` 后 Java 侧过滤为 0 件 |
+| V4 生成降级 | `mode:"extractive"`，answer 为拼装的退款原文，sources 含「退款规则」0.3162 |
+| 可用性兜底 | 停掉 AI 服务后 Java 返回 `{"semantic":false,"success":true,"data":[]}` HTTP 200，关键词搜索仍正常 |
+
+### 实施中的两处补充（文档未覆盖，按文档 7.4 的要求处理）
+
+**1. 召回阈值改为按向量模式区分（新增 `SIM_THRESHOLD_TFIDF`）**
+
+文档 7.4 把「相似度阈值不适用」列为风险并注明「实施时用真实数据调」。实测发现 tfidf 模式下命中项余弦仅 0.21-0.33，而默认 `SIM_THRESHOLD=0.35` 会把「能降噪的耳机 → 索尼耳机（0.3273）」这类正确结果整条切掉，`/ai/search` 直接返回空数组。
+
+处理：`config.default_threshold(mode)` 按模式取默认值 —— `vector` 用 0.35（Spec 原值），`tfidf` 用实测标定的 0.20；两者都可用环境变量覆盖。实测数据表记录在 `ai-service/README.md`，并新增 2 个回归用例锁定该行为。
+
+**2. 本机网络无法下载 `BAAI/bge-small-zh-v1.5`，验收全程跑在 tfidf 降级模式**
+
+HuggingFace 与 hf-mirror 均返回非 JSON 响应，`SentenceTransformer` 加载失败，`embedding.py` 按设计自动降级为词袋模式，`/health` 如实报告 `mode: "tfidf"`。这恰好把 Spec 6.2 与 V5 的降级路径完整走了一遍。
+
+**遗留**：语义向量模式（`vector`）尚未在真实模型下验证过，需在有网环境补做（保持 `EMB_FORCE_TFIDF` 为空直接启动即可，首次会自动下载约 100MB 模型）。
+
+### 与文档的一处操作偏差（环境问题，与代码无关）
+
+本机沙箱注入了 `SERVER__PORT=50511`，会覆盖 Spring Boot 端口导致启动失败（`Port 50511 was already in use`）。启动后端时用
+`env -u SERVER__PORT -u SERVER__HOST mvn -o spring-boot:run` 绕开。
 
 ---
 
@@ -88,12 +131,12 @@
 - Verify: `.gitignore`
 - Create: `.git`（由 init 生成）
 
-- [ ] **Step 1: 确认 .gitignore 已覆盖不该提交的内容**
+- [x] **Step 1: 确认 .gitignore 已覆盖不该提交的内容**
 
 Run: `Get-Content "d:\作业\毕业设计\campus-secondhand\.gitignore"`
 Expected: 内容中包含 `target/`、`node_modules/`、`dist/` 等条目；若缺少 `__pycache__/`、`*.pyc`、`ai-service/data/index/`、`.env`，追加进去。
 
-- [ ] **Step 2: 初始化并首次提交**
+- [x] **Step 2: 初始化并首次提交**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" init
@@ -119,12 +162,12 @@ Expected: 提交成功，`git status` 显示 working tree clean。
 - Create: `ai-service/tests/test_api.py`
 - Create: `ai-service/README.md`
 
-- [ ] **Step 1: 安装缺失依赖**
+- [x] **Step 1: 安装缺失依赖**
 
 Run: `python -m pip install jieba`
 Expected: `Successfully installed jieba-0.42.1`
 
-- [ ] **Step 2: 写 requirements.txt**
+- [x] **Step 2: 写 requirements.txt**
 
 ```
 fastapi
@@ -137,7 +180,7 @@ jieba
 scikit-learn
 ```
 
-- [ ] **Step 3: 写 config.py**
+- [x] **Step 3: 写 config.py**
 
 `ai-service/app/config.py`：
 
@@ -174,7 +217,7 @@ class Settings:
 settings = Settings()
 ```
 
-- [ ] **Step 4: 写 routers/health.py（最小版）**
+- [x] **Step 4: 写 routers/health.py（最小版）**
 
 `ai-service/app/routers/health.py`：
 
@@ -189,7 +232,7 @@ def health():
     return {"status": "ok"}
 ```
 
-- [ ] **Step 5: 写 main.py**
+- [x] **Step 5: 写 main.py**
 
 `ai-service/app/main.py`：
 
@@ -211,7 +254,7 @@ app.add_middleware(
 app.include_router(health.router)
 ```
 
-- [ ] **Step 6: 写 tests/conftest.py**
+- [x] **Step 6: 写 tests/conftest.py**
 
 ```python
 import os
@@ -239,7 +282,7 @@ def client():
 
 **关于 `SIM_THRESHOLD`**：语义向量模式下同类文本余弦通常在 0.6-0.9，0.35 是合理的召回门槛；词袋模式因缺乏 IDF 加权，余弦普遍偏低。因此阈值必须按模式校准——这是 Spec 7.4 已登记的"待调项"，最后要拿真实数据调。
 
-- [ ] **Step 7: 写 tests/test_api.py（健康检查用例）**
+- [x] **Step 7: 写 tests/test_api.py（健康检查用例）**
 
 ```python
 def test_health_ok(client):
@@ -248,12 +291,12 @@ def test_health_ok(client):
     assert resp.json()["status"] == "ok"
 ```
 
-- [ ] **Step 8: 运行测试（应先失败于缺少 TestClient 之外的原因）**
+- [x] **Step 8: 运行测试（应先失败于缺少 TestClient 之外的原因）**
 
 Run: `python -m pytest ai-service/tests/test_api.py -v`（在 `ai-service/` 目录下执行 `python -m pytest tests/test_api.py -v`）
 Expected: PASS。若报 `ModuleNotFoundError: No module named 'app'`，检查 conftest.py 的 `sys.path` 行。
 
-- [ ] **Step 9: 写 README.md**
+- [x] **Step 9: 写 README.md**
 
 `ai-service/README.md`：
 
@@ -301,7 +344,7 @@ python -m pytest tests/ -v
 ```
 ```
 
-- [ ] **Step 10: Commit**
+- [x] **Step 10: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -318,7 +361,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 搭建 AI
 
 **设计要点**：对外只暴露 `embed_texts` 与 `dim`、`mode`；内部懒加载模型；向量统一做 L2 归一化，使余弦相似度退化为点积。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `ai-service/tests/test_embedding.py`：
 
@@ -366,12 +409,12 @@ def test_mode_is_tfidf_in_test_env():
     assert e.mode() == "tfidf"
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd ai-service && python -m pytest tests/test_embedding.py -v`
 Expected: FAIL，报 `ModuleNotFoundError: No module named 'app.embedding'`
 
-- [ ] **Step 3: 写 embedding.py**
+- [x] **Step 3: 写 embedding.py**
 
 `ai-service/app/embedding.py`：
 
@@ -467,12 +510,12 @@ class Embedder:
 embedder = Embedder()
 ```
 
-- [ ] **Step 4: 运行测试确认通过**
+- [x] **Step 4: 运行测试确认通过**
 
 Run: `cd ai-service && python -m pytest tests/test_embedding.py -v`
 Expected: 5 passed
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -490,7 +533,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增文
 
 **设计要点**：支持多个命名集合（`goods`、`faq`）；检索用矩阵乘（向量已归一化，点积即余弦）；持久化为 `<集合名>.json`（id 与文本）+ `<集合名>.npy`（向量矩阵）。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `ai-service/tests/test_vector_store.py`：
 
@@ -575,12 +618,12 @@ def test_vector_dimension_mismatch_raises(tmp_path):
         pass
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd ai-service && python -m pytest tests/test_vector_store.py -v`
 Expected: FAIL，报 `ModuleNotFoundError: No module named 'app.vector_store'`
 
-- [ ] **Step 3: 写 vector_store.py**
+- [x] **Step 3: 写 vector_store.py**
 
 `ai-service/app/vector_store.py`：
 
@@ -724,7 +767,7 @@ def create_store() -> VectorStore:
     return VectorStore(settings.index_dir)
 ```
 
-- [ ] **Step 4: 写 deps.py（共享单例，避免循环依赖）**
+- [x] **Step 4: 写 deps.py（共享单例，避免循环依赖）**
 
 `ai-service/app/deps.py`：
 
@@ -741,12 +784,12 @@ from app.vector_store import VectorStore
 store = VectorStore(settings.index_dir)
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 Run: `cd ai-service && python -m pytest tests/test_vector_store.py -v`
 Expected: 8 passed
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -764,7 +807,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增向
 
 **设计要点**：`LLM.generate()` 只负责"能生成就生成、不能就抛 `LLMUnavailable`"；降级决策放在调用方（`chat.py`），保证 `llm.py` 职责单一、可测。
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 `ai-service/tests/test_llm.py`：
 
@@ -808,12 +851,12 @@ def test_extractive_answer_when_no_context():
     assert "暂时" in answer or "没有" in answer
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd ai-service && python -m pytest tests/test_llm.py -v`
 Expected: FAIL，报 `ModuleNotFoundError: No module named 'app.llm'`
 
-- [ ] **Step 3: 写 prompts.py**
+- [x] **Step 3: 写 prompts.py**
 
 `ai-service/app/prompts.py`：
 
@@ -847,7 +890,7 @@ def build_context(snippets: list[str]) -> str:
     return "\n".join(f"- {s}" for s in snippets)
 ```
 
-- [ ] **Step 4: 写 llm.py**
+- [x] **Step 4: 写 llm.py**
 
 `ai-service/app/llm.py`：
 
@@ -907,12 +950,12 @@ def _system_content() -> str:
 llm = LLM()
 ```
 
-- [ ] **Step 5: 运行测试确认通过**
+- [x] **Step 5: 运行测试确认通过**
 
 Run: `cd ai-service && python -m pytest tests/test_llm.py -v`
 Expected: 4 passed
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -931,7 +974,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增生
 
 **设计要点**：FAQ 条目格式 `{"id": int, "title": str, "content": str}`；入库文本为 `title + " " + content`；启动时装载进 `faq` 集合。
 
-- [ ] **Step 1: 写 data/faq.json**
+- [x] **Step 1: 写 data/faq.json**
 
 `ai-service/data/faq.json`（20 条，覆盖平台规则与交易流程；后续 P1 可扩充到 30-50 条）：
 
@@ -960,7 +1003,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增生
 ]
 ```
 
-- [ ] **Step 2: 写 knowledge.py**
+- [x] **Step 2: 写 knowledge.py**
 
 `ai-service/app/knowledge.py`：
 
@@ -1020,7 +1063,7 @@ class KnowledgeBase:
         return results
 ```
 
-- [ ] **Step 3: 在 deps.py 中挂载 knowledge 单例**
+- [x] **Step 3: 在 deps.py 中挂载 knowledge 单例**
 
 `ai-service/app/deps.py` 全量替换为：
 
@@ -1039,7 +1082,7 @@ store = VectorStore(settings.index_dir)
 knowledge = KnowledgeBase(store)
 ```
 
-- [ ] **Step 4: 在 conftest.py 中加入知识库装载夹具**
+- [x] **Step 4: 在 conftest.py 中加入知识库装载夹具**
 
 在 `ai-service/tests/conftest.py` 末尾追加：
 
@@ -1051,7 +1094,7 @@ def _load_knowledge():
     knowledge.load()
 ```
 
-- [ ] **Step 5: 写装载验证测试**
+- [x] **Step 5: 写装载验证测试**
 
 追加到 `ai-service/tests/test_api.py`：
 
@@ -1074,12 +1117,12 @@ def test_knowledge_search_returns_score(client):
     assert hits[0]["score"] > 0
 ```
 
-- [ ] **Step 6: 运行测试**
+- [x] **Step 6: 运行测试**
 
 Run: `cd ai-service && python -m pytest tests/test_api.py -v`
 Expected: 3 passed
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -1096,7 +1139,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增平
 - Modify: `ai-service/app/main.py`（注册路由、创建 store、启动装载知识库）
 - Modify: `ai-service/tests/test_api.py`（追加用例）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `ai-service/tests/test_api.py`：
 
@@ -1136,12 +1179,12 @@ def test_index_upsert_replaces(client):
     assert len(resp.json()["results"]) == 1
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd ai-service && python -m pytest tests/test_api.py -v`
 Expected: FAIL，`/ai/embed` 返回 404
 
-- [ ] **Step 3: 写 routers/embed.py**
+- [x] **Step 3: 写 routers/embed.py**
 
 `ai-service/app/routers/embed.py`：
 
@@ -1165,7 +1208,7 @@ def embed(req: EmbedRequest):
     return {"dim": embedder.dim(), "vectors": vectors}
 ```
 
-- [ ] **Step 4: 写 routers/index.py**
+- [x] **Step 4: 写 routers/index.py**
 
 `ai-service/app/routers/index.py`：
 
@@ -1214,7 +1257,7 @@ def rebuild_index(req: IndexRequest):
 
 **注意**：`/ai/index` 与 `/ai/index/rebuild` 都挂在 `prefix="/ai/index"` 下，分别对应 `POST /ai/index` 与 `POST /ai/index/rebuild`。
 
-- [ ] **Step 5: 写 routers/search.py**
+- [x] **Step 5: 写 routers/search.py**
 
 `ai-service/app/routers/search.py`：
 
@@ -1247,7 +1290,7 @@ def search(req: SearchRequest):
     }
 ```
 
-- [ ] **Step 6: 改 main.py 注册路由**
+- [x] **Step 6: 改 main.py 注册路由**
 
 `ai-service/app/main.py` 全量替换为：
 
@@ -1285,12 +1328,12 @@ app.include_router(search.router)
 
 **注意**：`store` 与 `knowledge` 不在此文件创建，统一由 `app/deps.py` 提供，避免与 `routers/index.py` 形成循环 import。
 
-- [ ] **Step 7: 运行测试确认通过**
+- [x] **Step 7: 运行测试确认通过**
 
 Run: `cd ai-service && python -m pytest tests/ -v`
 Expected: 全部 passed（含健康检查、知识库、embed、index、search）
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -1307,7 +1350,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增向
 - Modify: `ai-service/tests/test_api.py`（追加用例）
 - Modify: `ai-service/app/routers/health.py`（返回真实模式）
 
-- [ ] **Step 1: 写失败测试**
+- [x] **Step 1: 写失败测试**
 
 追加到 `ai-service/tests/test_api.py`：
 
@@ -1334,12 +1377,12 @@ def test_health_reports_real_modes(client):
     assert "count" in body["index"]
 ```
 
-- [ ] **Step 2: 运行测试确认失败**
+- [x] **Step 2: 运行测试确认失败**
 
 Run: `cd ai-service && python -m pytest tests/test_api.py -v`
 Expected: FAIL，`/ai/chat` 返回 404
 
-- [ ] **Step 3: 写 routers/chat.py**
+- [x] **Step 3: 写 routers/chat.py**
 
 `ai-service/app/routers/chat.py`：
 
@@ -1420,7 +1463,7 @@ def _retrieve(question: str, top_k: int) -> list[dict]:
     return sources[:top_k]
 ```
 
-- [ ] **Step 4: 写 routers/health.py（完整版）**
+- [x] **Step 4: 写 routers/health.py（完整版）**
 
 `ai-service/app/routers/health.py` 全量替换为：
 
@@ -1450,7 +1493,7 @@ def health():
     }
 ```
 
-- [ ] **Step 5: 在 main.py 注册 chat 路由**
+- [x] **Step 5: 在 main.py 注册 chat 路由**
 
 修改 `ai-service/app/main.py` 的两处：
 
@@ -1461,12 +1504,12 @@ from app.routers import chat, embed, health, index, search
 app.include_router(chat.router)
 ```
 
-- [ ] **Step 6: 运行测试确认通过**
+- [x] **Step 6: 运行测试确认通过**
 
 Run: `cd ai-service && python -m pytest tests/ -v`
 Expected: 全部 passed
 
-- [ ] **Step 7: 手动验证真实模型路径（可选，耗时较长）**
+- [x] **Step 7: 手动验证真实模型路径（可选，耗时较长）**
 
 ```bash
 cd ai-service
@@ -1474,7 +1517,7 @@ python -c "from app.embedding import Embedder; e=Embedder(); print(e.mode(), e.d
 ```
 不设 `EMB_FORCE_TFIDF` 时 Expected: 首次运行会下载约 100MB 模型，随后输出 `vector 512`。
 
-- [ ] **Step 8: Commit**
+- [x] **Step 8: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add ai-service
@@ -1490,7 +1533,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增 RA
 
 **设计要点**：用 Spring 自带的 `RestTemplate`（无需新增依赖）；所有方法在异常时返回空集合，保证 AI 服务宕机时业务不崩。
 
-- [ ] **Step 1: 写 AiClient.java**
+- [x] **Step 1: 写 AiClient.java**
 
 ```java
 package com.example.demo.service;
@@ -1609,12 +1652,12 @@ public class AiClient {
 
 **文件说明**：`AiClient` 只用 Spring 自带的 `RestTemplate`（不新增依赖），并设置 2s 连接超时、25s 读超时；任何异常都返回空结果，因此 AI 服务宕机时业务自动退化为关键词搜索。
 
-- [ ] **Step 2: 编译验证**
+- [x] **Step 2: 编译验证**
 
 Run: `cd demo1 && mvn -q compile`
 Expected: BUILD SUCCESS
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add demo1
@@ -1631,7 +1674,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增 Ja
 
 **设计要点**：语义搜索在 Java 侧完成过滤与回填。流程：AI 召回 `top_k * 3` 个 id → 查 MySQL → 按分类/价格/在售过滤 → 截断 `top_k`。AI 不可用时返回空结果，由前端回退到普通搜索。
 
-- [ ] **Step 1: 写 AiController.java**
+- [x] **Step 1: 写 AiController.java**
 
 ```java
 package com.example.demo.controller;
@@ -1743,7 +1786,7 @@ public class AiController {
 }
 ```
 
-- [ ] **Step 2: 在 ApiController 中接入索引推送**
+- [x] **Step 2: 在 ApiController 中接入索引推送**
 
 修改 `demo1/src/main/java/com/example/demo/controller/ApiController.java`：
 
@@ -1777,7 +1820,7 @@ import com.example.demo.service.AiClient;
             return ResponseEntity.ok("{\"success\":true,\"goodsId\":" + goods.getId() + "}");
 ```
 
-- [ ] **Step 3: 在 application.properties 中加入 AI 服务地址**
+- [x] **Step 3: 在 application.properties 中加入 AI 服务地址**
 
 追加到 `demo1/src/main/resources/application.properties`：
 
@@ -1786,12 +1829,12 @@ import com.example.demo.service.AiClient;
 ai.service.url=http://localhost:8000
 ```
 
-- [ ] **Step 4: 编译验证**
+- [x] **Step 4: 编译验证**
 
 Run: `cd demo1 && mvn -q compile`
 Expected: BUILD SUCCESS
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add demo1
@@ -1807,7 +1850,7 @@ git -C "d:\作业\毕业设计\campus-secondhand" commit -m "feat(ai): 新增语
 
 **前置**：三个服务均已启动。
 
-- [ ] **Step 1: 启动 AI 服务**
+- [x] **Step 1: 启动 AI 服务**
 
 ```bash
 cd ai-service
@@ -1815,19 +1858,19 @@ uvicorn app.main:app --port 8000
 ```
 Expected: 日志出现 `知识库已装载 20 条`
 
-- [ ] **Step 2: V1 健康检查**
+- [x] **Step 2: V1 健康检查**
 
 Run: `Invoke-RestMethod -Uri "http://localhost:8000/health" | ConvertTo-Json`
 Expected: `status: ok`，且 `embedding.mode`、`llm.mode`、`index.count` 均为真实值
 
 > **Windows 命令注意事项**：PowerShell 中 `curl` 是 `Invoke-WebRequest` 的别名，参数与 curl 不兼容；且含中文的 JSON 必须显式 UTF-8 编码，否则会乱码或被拒。以下统一用 `Invoke-RestMethod` + `UTF8.GetBytes`。
 
-- [ ] **Step 3: V7 全量重建索引（演示前必做）**
+- [x] **Step 3: V7 全量重建索引（演示前必做）**
 
 Run: `Invoke-RestMethod -Uri "http://localhost:8080/api/ai/reindex" -Method Post | ConvertTo-Json`
 Expected: `success: True`、`indexed: N`，N 为在售商品数
 
-- [ ] **Step 4: V3 语义召回**
+- [x] **Step 4: V3 语义召回**
 
 ```powershell
 $body  = '{"query":"能降噪的耳机","top_k":5}'
@@ -1836,12 +1879,12 @@ Invoke-RestMethod -Uri "http://localhost:8000/ai/search" -Method Post -Body $byt
 ```
 Expected: `results` 首个 `goodsId` 命中"索尼 WH-1000XM5 头戴式耳机"
 
-- [ ] **Step 5: V6 Java 链路（keyword 用 URL 编码的"降噪耳机"）**
+- [x] **Step 5: V6 Java 链路（keyword 用 URL 编码的"降噪耳机"）**
 
 Run: `Invoke-RestMethod -Uri "http://localhost:8080/api/ai/search?keyword=%E9%99%8D%E5%99%AA%E8%80%B3%E6%9C%BA" | ConvertTo-Json -Depth 5`
 Expected: `semantic: True`，`data` 数组首项为索尼耳机
 
-- [ ] **Step 6: V4 生成降级**
+- [x] **Step 6: V4 生成降级**
 
 ```powershell
 $body  = '{"question":"怎么退款","top_k":3}'
@@ -1850,17 +1893,17 @@ Invoke-RestMethod -Uri "http://localhost:8000/ai/chat" -Method Post -Body $bytes
 ```
 Expected: `mode: "extractive"`，`answer` 含退款相关原文，`sources` 非空
 
-- [ ] **Step 7: 可用性兜底验证**
+- [x] **Step 7: 可用性兜底验证**
 
 关闭 AI 服务进程，再执行 Step 5。
 Expected: `semantic: False`、`data: []`，**Spring Boot 不抛异常、不返回 500**
 
-- [ ] **Step 8: V8 全量单测**
+- [x] **Step 8: V8 全量单测**
 
 Run: `cd ai-service && python -m pytest tests/ -v`
 Expected: 全部 passed
 
-- [ ] **Step 9: 最终提交**
+- [x] **Step 9: 最终提交**
 
 ```bash
 git -C "d:\作业\毕业设计\campus-secondhand" add -A

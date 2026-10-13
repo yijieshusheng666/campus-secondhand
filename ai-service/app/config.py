@@ -17,6 +17,8 @@ class Settings:
         self.llm_timeout = int(os.getenv("LLM_TIMEOUT", "20"))
 
         self.sim_threshold = float(os.getenv("SIM_THRESHOLD", "0.35"))
+        # 词袋模式缺少 IDF 加权，余弦值整体偏低，必须单独校准（见 default_threshold）
+        self.sim_threshold_tfidf = float(os.getenv("SIM_THRESHOLD_TFIDF", "0.20"))
 
         self.index_dir = os.getenv("INDEX_DIR", os.path.join(BASE_DIR, "data", "index"))
         self.faq_path = os.getenv("FAQ_PATH", os.path.join(BASE_DIR, "data", "faq.json"))
@@ -25,6 +27,16 @@ class Settings:
     def llm_enabled(self) -> bool:
         """三项都配齐才认为云端生成可用，否则走抽取式降级。"""
         return bool(self.llm_base_url and self.llm_api_key and self.llm_model)
+
+    def default_threshold(self, mode: str) -> float:
+        """按实际生效的向量模式取默认召回阈值。
+
+        两种模式的余弦分布量级不同，用同一个阈值必然二选一失效：
+        - vector（bge 语义向量）：同类文本余弦多在 0.6-0.9，0.35 足以截断噪声；
+        - tfidf（jieba 词袋哈希，无 IDF 加权）：2026-10-13 用真实数据实测，
+          命中项落在 0.21-0.33，噪声项 ≤0.20，故取 0.20。
+        """
+        return self.sim_threshold_tfidf if mode == "tfidf" else self.sim_threshold
 
 
 settings = Settings()

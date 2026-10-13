@@ -77,3 +77,27 @@ def test_health_reports_real_modes(client):
     assert body["embedding"]["mode"] in ("vector", "tfidf")
     assert body["llm"]["mode"] in ("api", "extractive")
     assert "count" in body["index"]
+
+
+def test_default_threshold_is_mode_aware(monkeypatch):
+    """两种向量模式的余弦量级不同，默认阈值必须分模式取值。"""
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "sim_threshold", 0.35)
+    monkeypatch.setattr(settings, "sim_threshold_tfidf", 0.20)
+    assert settings.default_threshold("vector") == 0.35
+    assert settings.default_threshold("tfidf") == 0.20
+
+
+def test_search_uses_default_threshold_when_omitted(client):
+    """不传 min_score 时走模式默认阈值：命中项保留、低于阈值的噪声被丢弃。"""
+    client.post("/ai/index/rebuild", json={"items": [
+        {"goodsId": 1, "text": "索尼 WH-1000XM5 头戴式耳机 电子产品 行业领先的降噪"},
+        {"goodsId": 2, "text": "无印良品 加湿器 生活用品 超声波加湿 大容量 4L"},
+        {"goodsId": 3, "text": "高等数学 第七版 图书教材 同济大学数学系编"},
+    ]})
+    resp = client.post("/ai/search", json={"query": "能降噪的耳机", "top_k": 5})
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert results, "默认阈值下应能召回耳机"
+    assert results[0]["goodsId"] == 1
