@@ -42,6 +42,21 @@ async function loadVerifyStatus() {
   }
 }
 
+// B3 信用分与收到的评价
+const credit = ref({ creditScore: 60, avgScore: 0, reviewCount: 0, creditLevel: '新用户' })
+const reviews = ref([])
+
+async function loadReviews() {
+  if (!user.value) return
+  try {
+    const { data } = await request.get('/reviews', { params: { userId: user.value.id } })
+    reviews.value = data.data || []
+    if (data.credit) credit.value = data.credit
+  } catch (e) {
+    // 评价加载失败不影响页面其他部分
+  }
+}
+
 function openVerifyDialog() {
   if (verified.value) {
     ElMessage.success(`该账号已实名认证：${realNameMasked.value}`)
@@ -262,6 +277,7 @@ onMounted(() => {
   loadMyGoods()
   loadSales()
   loadVerifyStatus()
+  loadReviews()
 })
 </script>
 
@@ -293,6 +309,35 @@ onMounted(() => {
           <el-button @click="openNameDialog">修改昵称</el-button>
           <el-button @click="openAddrDialog">收货地址管理</el-button>
           <el-button type="danger" plain @click="onLogout">退出登录</el-button>
+        </div>
+      </el-card>
+
+      <!-- B3 信用分与收到的评价 -->
+      <el-card class="section-card" shadow="never">
+        <div class="section-header">
+          <h3>我的信用</h3>
+          <el-tag size="small" :type="credit.creditScore >= 75 ? 'success' : 'info'">
+            {{ credit.creditLevel }}
+          </el-tag>
+        </div>
+        <div class="credit-row">
+          <div class="credit-score">{{ credit.creditScore }}<span class="credit-unit">分</span></div>
+          <div class="credit-meta">
+            <div>平均星级：{{ credit.reviewCount ? credit.avgScore + ' 星' : '暂无评价' }}</div>
+            <div>收到评价：{{ credit.reviewCount }} 条</div>
+            <div class="credit-formula">基准 60 + (平均星级-3)×15 + min(评价数,10)</div>
+          </div>
+        </div>
+        <el-empty v-if="reviews.length === 0" description="还没有收到评价" :image-size="60" />
+        <div v-for="r in reviews" :key="r.id" class="review-item">
+          <div class="review-item-head">
+            <span class="review-from">
+              {{ r.reviewerName }}（{{ r.role === 'buyer' ? '买家评我' : '卖家评我' }}）
+            </span>
+            <el-rate :model-value="r.score" disabled size="small" />
+          </div>
+          <div class="review-text">{{ r.content || '未填写评价内容' }}</div>
+          <div class="review-sub">{{ r.goodsTitle }} · {{ formatTime(r.createdAt) }}</div>
         </div>
       </el-card>
 
@@ -400,6 +445,18 @@ onMounted(() => {
 .verify-label { width: 64px; color: #888; flex-shrink: 0; }
 .verify-value { color: var(--ink-color); font-weight: 600; }
 .verify-note { color: #bbb; font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
+
+/* B3 信用分 */
+.credit-row { display: flex; align-items: center; gap: 20px; padding: 6px 0 14px; }
+.credit-score { font-size: 40px; font-weight: bold; color: var(--price-color); line-height: 1; }
+.credit-unit { font-size: 14px; margin-left: 2px; color: #999; }
+.credit-meta { font-size: 13px; color: #666; line-height: 1.9; }
+.credit-formula { font-size: 11px; color: #bbb; }
+.review-item { padding: 10px 0; border-top: 1px solid #f0f0f0; }
+.review-item-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.review-from { font-size: 13px; font-weight: 600; color: var(--ink-color); }
+.review-text { font-size: 13px; color: #555; line-height: 1.6; margin: 4px 0; }
+.review-sub { font-size: 11px; color: #bbb; }
 .user-info { text-align: center; cursor: default; }
 .user-avatar { background: #ffd21e; color: #23201a; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
 .stuid { color: #999; font-size: 13px; margin-top: 4px; }

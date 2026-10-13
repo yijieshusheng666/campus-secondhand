@@ -28,6 +28,7 @@ const searchMode = ref('')
 const detailVisible = ref(false)
 const detailGoods = ref(null)
 const sellerName = ref('')
+const sellerInfo = ref(null)
 
 // 下单弹窗
 const buyVisible = ref(false)
@@ -107,9 +108,12 @@ async function showDetail(goods) {
   detailGoods.value = goods
   detailVisible.value = true
   sellerName.value = ''
+  sellerInfo.value = null
   try {
     const { data } = await request.get(`/users/${goods.userId}`)
     sellerName.value = data.username
+    // B1/B3：卖家实名标识与信用分（接口只返回脱敏姓名）
+    sellerInfo.value = data
   } catch (e) {
     // 卖家信息拿不到不影响详情展示
   }
@@ -265,7 +269,13 @@ onMounted(loadGoods)
           <span class="gc-tag gc-tag-school">🎓 校园面交</span>
           <span class="gc-tag gc-tag-cate">{{ detailGoods.category }}</span>
         </div>
-        <div class="detail-seller">卖家：{{ sellerName || '—' }}</div>
+        <div class="detail-seller">
+          卖家：{{ sellerName || '—' }}
+          <el-tag v-if="sellerInfo?.verified" size="small" type="success" class="seller-tag">已实名</el-tag>
+          <el-tag size="small" type="info" class="seller-tag">
+            信用 {{ sellerInfo?.creditScore ?? 60 }} 分 · {{ sellerInfo?.creditLevel || '新用户' }}
+          </el-tag>
+        </div>
         <div class="detail-desc-title">宝贝描述</div>
         <p class="detail-desc">{{ detailGoods.description || '暂无描述' }}</p>
       </div>
@@ -340,6 +350,7 @@ onMounted(loadGoods)
 }
 .sm-tag.semantic { background: #e8f3ff; color: #1a5fb4; }
 .sm-count { font-size: 12px; color: #999; }
+.seller-tag { margin-left: 6px; }
 .hero-search :deep(.el-input__wrapper) { border-radius: 20px; }
 
 /* 分类胶囊 */

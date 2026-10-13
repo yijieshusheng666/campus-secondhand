@@ -54,6 +54,9 @@ public class ApiController {
     @Autowired
     private AiClient aiClient;
 
+    @Autowired
+    private com.example.demo.service.CreditService creditService;
+
     // 获取商品列表：支持分类、关键词筛选，已售商品不下架但不在列表中展示
     @GetMapping("/goods")
     public List<Goods> getGoods(@RequestParam(required = false) String category,
@@ -220,6 +223,8 @@ public class ApiController {
         // B1：只对外暴露"是否已实名"和脱敏姓名，不返回完整真实姓名
         result.put("verified", Boolean.TRUE.equals(user.getVerified()));
         result.put("realNameMasked", maskName(user.getRealName()));
+        // B3：信用分与评价概览，供商品详情展示卖家信誉
+        result.putAll(creditService.summaryOf(user.getId()));
         return ResponseEntity.ok(result);
     }
 
