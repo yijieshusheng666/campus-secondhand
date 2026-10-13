@@ -71,6 +71,30 @@ async function loadMessages() {
 async function openConversation(conv) {
   active.value = { ...conv }
   await loadMessages()
+  loadActiveGoods()
+}
+
+// 会话对应的商品详情：既给头部卡片用（图片/价格），也给 AI 摘要/议价提供商品信息
+const activeGoods = ref(null)
+
+async function loadActiveGoods() {
+  activeGoods.value = null
+  if (!active.value?.goodsId) return null
+  try {
+    const { data } = await request.get(`/goods/${active.value.goodsId}`)
+    activeGoods.value = data
+    return data
+  } catch (e) {
+    return null
+  }
+}
+
+function goGoods() {
+  if (!active.value?.goodsId) {
+    ElMessage.info('这个会话没有关联的宝贝')
+    return
+  }
+  router.push({ path: '/', query: { goodsId: active.value.goodsId } })
 }
 
 // 从商品页「联系卖家」跳转过来时，会话可能还不存在，需要先补齐商品标题和卖家昵称
@@ -123,16 +147,6 @@ async function sendMessage() {
     }
   } catch (e) {
     ElMessage.error(e.response?.data?.message || '发送失败，请检查后端服务')
-  }
-}
-
-async function loadActiveGoods() {
-  if (!active.value) return null
-  try {
-    const { data } = await request.get(`/goods/${active.value.goodsId}`)
-    return data
-  } catch (e) {
-    return null
   }
 }
 
@@ -263,7 +277,20 @@ onUnmounted(() => {
           <div class="chat-head">
             <div class="chat-head-main">
               <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
-              <div class="chat-goods">宝贝：{{ active.goodsTitle || '—' }}</div>
+              <!-- 点卡片直接回首页看这件宝贝的详情 -->
+              <div class="chat-goods-card" :class="{ empty: !active.goodsId }" @click="goGoods">
+                <img v-if="activeGoods?.images?.length" class="cg-img"
+                  :src="activeGoods.images[0].imageUrl" alt="宝贝">
+                <div v-else class="cg-img cg-img-empty">🎁</div>
+                <div class="cg-body">
+                  <div class="cg-title">{{ active.goodsTitle || '（商品信息缺失）' }}</div>
+                  <div class="cg-sub">
+                    <span v-if="activeGoods" class="cg-price">¥{{ activeGoods.price }}</span>
+                    <span v-if="activeGoods && !activeGoods.status" class="cg-price">—</span>
+                    <span class="cg-link">查看宝贝详情 ›</span>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="chat-actions">
               <el-button size="small" round @click="doSummarize">AI 摘要</el-button>
@@ -413,7 +440,42 @@ onUnmounted(() => {
 .script-label { font-size: 12px; font-weight: 600; color: #8a6100; margin-bottom: 4px; }
 .script-text { font-size: 13px; line-height: 1.6; color: #444; margin-bottom: 8px; }
 .assist-mode { font-size: 12px; color: #bbb; margin-right: 10px; }
-.chat-goods { font-size: 12px; color: #8a6100; margin-top: 4px; }
+/* 会话头部：可点击的宝贝卡片 */
+.chat-goods-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  padding: 6px 10px 6px 6px;
+  background: #fff;
+  border: 1px solid #f0e2b0;
+  border-radius: 10px;
+  max-width: 340px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.chat-goods-card:hover { border-color: #ffd21e; box-shadow: 0 2px 8px rgba(255, 210, 30, 0.3); }
+.chat-goods-card.empty { cursor: default; opacity: 0.6; }
+.cg-img { width: 42px; height: 42px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+.cg-img-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7f8fa;
+  font-size: 18px;
+}
+.cg-body { min-width: 0; }
+.cg-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-color);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cg-sub { display: flex; align-items: center; gap: 8px; margin-top: 2px; }
+.cg-price { font-size: 13px; font-weight: bold; color: var(--price-color); }
+.cg-link { font-size: 12px; color: #1a5fb4; }
 .chat-body {
   flex: 1;
   overflow-y: auto;

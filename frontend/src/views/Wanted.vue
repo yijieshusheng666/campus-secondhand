@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../api'
+import SectionTabs from '../components/SectionTabs.vue'
 
 const router = useRouter()
 const user = JSON.parse(localStorage.getItem('user') || 'null')
@@ -14,11 +15,12 @@ const publishing = ref(false)
 // 发布后立刻展示首轮匹配结果：求购的价值就在"当场看到有没有货"
 const justMatched = ref([])
 const justMessage = ref('')
+const justMeta = ref(null)
 
-const openList = ref([])
 const myList = ref([])
 const loading = ref(false)
 const matches = ref({})      // { [wantedId]: [goods...] }
+const matchMeta = ref({})    // { [wantedId]: { scanned, semanticCount, reasons } }
 const loadingMatch = ref(0)
 
 function getImageUrl(path) {
@@ -31,15 +33,21 @@ function formatTime(t) {
   return String(t).replace('T', ' ').slice(0, 16)
 }
 
+// 把后端返回的匹配依据整理成 { goodsId: reason }，供卡片展示
+function collectMeta(data) {
+  const reasons = {}
+  for (const info of data.matchInfo || []) {
+    reasons[info.goodsId] = info.reason
+  }
+  return { scanned: data.scanned, semanticCount: data.semanticCount, reasons }
+}
+
 async function loadWanted() {
   loading.value = true
   try {
-    const [openResp, mineResp] = await Promise.all([
-      request.get('/wanted/open'),
-      user ? request.get('/wanted', { params: { userId: user.id } }) : Promise.resolve({ data: { data: [] } })
-    ])
-    // 广场里去掉自己发的，避免重复展示
-    openList.value = (openResp.data.data || []).filter(w => w.userId !== user?.id)
+    const mineResp = user
+      ? await request.get('/wanted', { params: { userId: user.id } })
+      : { data: { data: [] } }
     myList.value = mineResp.data.data || []
   } catch (e) {
     ElMessage.error('求购列表加载失败')
@@ -71,6 +79,7 @@ async function publish() {
       ElMessage.success(data.message)
       justMessage.value = data.message
       justMatched.value = data.matches || []
+      justMeta.value = collectMeta(data)
       form.value = { title: '', category: '不限', maxPrice: '', description: '' }
       await loadWanted()
     } else {
@@ -88,8 +97,9 @@ async function findMatches(wanted) {
   try {
     const { data } = await request.get(`/wanted/${wanted.id}/matches`)
     matches.value = { ...matches.value, [wanted.id]: data.data || [] }
+    matchMeta.value = { ...matchMeta.value, [wanted.id]: collectMeta(data) }
     if (!data.data?.length) {
-      ElMessage.info('暂时没有匹配的在售商品，等有新货上架再来看看')
+      ElMessage.info(`已比对站上 ${data.scanned} 件商品，暂时没有能买的匹配项`)
     }
   } catch (e) {
     ElMessage.error('匹配失败，请检查后端服务')
@@ -132,10 +142,12 @@ onMounted(loadWanted)
 
 <template>
   <div class="wanted-page">
+    <SectionTabs active="mine" />
+
     <!-- 发布求购 -->
     <el-card class="post-card" shadow="never">
       <h2 class="post-title">我要求购 🎯</h2>
-      <p class="post-sub">写下你想要的东西，系统会反向去在售的宝贝里帮你找。</p>
+      <p class="post-sub">写下你想要的东西，系统会拿它去比对站上全部商品，把能买的挑出来。</p>
       <div class="form-row">
         <el-input v-model="form.title" maxlength="40" show-word-limit
           placeholder="想求购什么，例如：能降噪的耳机" />
@@ -156,11 +168,16 @@ onMounted(loadWanted)
 
       <div v-if="justMessage" class="matched-box">
         <div class="matched-head">🤖 {{ justMessage }}</div>
+        <div v-if="justMeta" class="match-meta">
+          比对范围：站上 <b>{{ justMeta.scanned }}</b> 件商品（语义候选
+          {{ justMeta.semanticCount }} 件），其中 <b>{{ justMatched.length }}</b> 件在售且满足分类/预算
+        </div>
         <div v-if="justMatched.length" class="goods-grid">
           <div v-for="g in justMatched" :key="g.id" class="goods-card">
             <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
+            <div v-if="justMeta?.reasons?.[g.id]" class="gc-reason">{{ justMeta.reasons[g.id] }}</div>
             <el-button size="small" round @click="chatWithSeller(g)">聊一聊</el-button>
           </div>
         </div>
@@ -185,45 +202,19 @@ onMounted(loadWanted)
             @click="findMatches(w)">找找看匹配的宝贝</el-button>
           <el-button v-if="w.status === '进行中'" size="small" @click="closeWanted(w)">关闭求购</el-button>
         </div>
+        <div v-if="matches[w.id]" class="match-meta">
+          比对范围：站上 <b>{{ matchMeta[w.id]?.scanned }}</b> 件商品（语义候选
+          {{ matchMeta[w.id]?.semanticCount }} 件），其中 <b>{{ matches[w.id].length }}</b> 件入选
+        </div>
         <div v-if="matches[w.id]" class="goods-grid">
-          <el-empty v-if="matches[w.id].length === 0" description="暂无匹配的宝贝" :image-size="60" />
+          <el-empty v-if="matches[w.id].length === 0" description="暂无匹配且在售的宝贝" :image-size="60" />
           <div v-for="g in matches[w.id]" :key="g.id" class="goods-card">
             <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
-            <el-button size="small" round @click="chatWithSeller(g)">聊一聊</el-button>
-          </div>
-        </div>
-      </div>
-    </el-card>
-
-    <!-- 求购广场 -->
-    <el-card class="section-card" shadow="never" v-loading="loading">
-      <div class="section-header">
-        <h3>求购广场</h3>
-        <span class="section-hint">同学在找这些宝贝，手上有货可以直接去找他聊</span>
-      </div>
-      <el-empty v-if="!loading && openList.length === 0" description="还没有别人发布的求购" />
-      <div v-for="w in openList" :key="w.id" class="wanted-item">
-        <div class="wanted-head">
-          <span class="wanted-title">{{ w.title }}</span>
-          <el-tag size="small" type="warning">{{ w.category || '不限' }}</el-tag>
-        </div>
-        <div class="wanted-meta">
-          {{ w.userName }} 求购 · 预算 {{ w.maxPrice ? '¥' + w.maxPrice : '不限' }}
-          · {{ formatTime(w.createdAt) }}
-        </div>
-        <div class="wanted-desc" v-if="w.description">{{ w.description }}</div>
-        <div class="wanted-actions">
-          <el-button size="small" plain :loading="loadingMatch === w.id"
-            @click="findMatches(w)">看看有哪些在售的</el-button>
-        </div>
-        <div v-if="matches[w.id]" class="goods-grid">
-          <el-empty v-if="matches[w.id].length === 0" description="目前没有匹配的在售商品" :image-size="60" />
-          <div v-for="g in matches[w.id]" :key="g.id" class="goods-card">
-            <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
-            <div class="gc-title">{{ g.title }}</div>
-            <div class="gc-price">¥{{ g.price }}</div>
+            <div v-if="matchMeta[w.id]?.reasons?.[g.id]" class="gc-reason">
+              {{ matchMeta[w.id].reasons[g.id] }}
+            </div>
             <el-button size="small" round @click="chatWithSeller(g)">聊一聊</el-button>
           </div>
         </div>
@@ -278,4 +269,22 @@ onMounted(loadWanted)
   white-space: nowrap;
 }
 .gc-price { color: var(--price-color); font-weight: bold; margin-bottom: 6px; }
+.match-meta {
+  margin-top: 12px;
+  font-size: 12px;
+  color: #1a5fb4;
+  background: #e8f3ff;
+  border-radius: 8px;
+  padding: 6px 10px;
+}
+.gc-reason {
+  font-size: 11px;
+  color: #1a5fb4;
+  background: #f2f7ff;
+  border-radius: 6px;
+  padding: 3px 6px;
+  margin-bottom: 6px;
+  line-height: 1.5;
+  text-align: left;
+}
 </style>

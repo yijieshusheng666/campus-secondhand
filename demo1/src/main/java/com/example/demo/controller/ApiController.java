@@ -58,20 +58,16 @@ public class ApiController {
     @Autowired
     private com.example.demo.service.CreditService creditService;
 
-    // 获取商品列表：支持分类、关键词、课程号筛选，已售商品不下架但不在列表中展示
+    // 获取商品列表：支持分类、关键词筛选，已售商品不下架但不在列表中展示
     @GetMapping("/goods")
     public List<Goods> getGoods(@RequestParam(required = false) String category,
-                                @RequestParam(required = false) String keyword,
-                                @RequestParam(required = false) String courseCode) {
+                                @RequestParam(required = false) String keyword) {
         return goodsRepository.findAll().stream()
                 .filter(g -> !"已售".equals(g.getStatus()))
                 .filter(g -> category == null || category.isBlank() || category.equals(g.getCategory()))
-                // C2：按课程号 / 课程名找教材
-                .filter(g -> courseCode == null || courseCode.isBlank()
-                        || (g.getCourseCode() != null && g.getCourseCode().contains(courseCode.trim())))
                 .filter(g -> {
                     if (keyword == null || keyword.isBlank()) return true;
-                    // 关键词同时匹配课程号，这样搜「MA101」也能找到教材
+                    // 关键词同时匹配课程号，所以搜「CS101」也能找到对应教材
                     String text = g.getTitle() + g.getCategory() + g.getDescription()
                             + (g.getCourseCode() == null ? "" : g.getCourseCode());
                     return text.contains(keyword.trim());

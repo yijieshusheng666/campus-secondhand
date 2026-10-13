@@ -82,15 +82,19 @@ public class WantedController {
         wanted.setDescription(description);
         wantedRepository.save(wanted);
 
-        List<Goods> matched = matchService.matchGoods(wanted, 6);
+        WantedMatchService.MatchResult matched = matchService.matchGoods(wanted, 6);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
         result.put("wantedId", wanted.getId());
-        result.put("message", matched.isEmpty()
-                ? "求购已发布，暂时没有匹配的在售商品"
-                : "求购已发布，已为你找到 " + matched.size() + " 件匹配的宝贝");
-        result.put("matches", matched);
+        result.put("message", matched.getGoods().isEmpty()
+                ? "求购已发布，比对完 " + matched.getScanned() + " 件商品，暂时没有匹配的"
+                : "求购已发布，比对 " + matched.getScanned() + " 件商品，找到 "
+                        + matched.getGoods().size() + " 件匹配的");
+        result.put("matches", matched.getGoods());
+        result.put("matchInfo", matched.getMatchInfo());
+        result.put("scanned", matched.getScanned());
+        result.put("semanticCount", matched.getSemanticCount());
         return ResponseEntity.ok(result);
     }
 
@@ -120,17 +124,20 @@ public class WantedController {
         return ResponseEntity.ok(result);
     }
 
-    // 某条求购匹配到的在售商品
+    // 某条求购匹配到的在售商品（附「凭什么匹配」的说明，便于核对）
     @GetMapping("/{id}/matches")
     public ResponseEntity<?> matches(@PathVariable Long id) {
         Wanted wanted = wantedRepository.findById(id).orElse(null);
         if (wanted == null) {
             return ResponseEntity.badRequest().body(fail("求购不存在"));
         }
-        List<Goods> matched = matchService.matchGoods(wanted, 6);
+        WantedMatchService.MatchResult matched = matchService.matchGoods(wanted, 6);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
-        result.put("data", matched);
+        result.put("data", matched.getGoods());
+        result.put("matchInfo", matched.getMatchInfo());
+        result.put("scanned", matched.getScanned());
+        result.put("semanticCount", matched.getSemanticCount());
         result.put("wanted", view(wanted, false));
         return ResponseEntity.ok(result);
     }

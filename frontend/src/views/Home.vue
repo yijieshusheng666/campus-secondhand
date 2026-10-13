@@ -1,9 +1,10 @@
 <script setup>
 import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import request from '../api'
 
+const route = useRoute()
 const router = useRouter()
 
 // 分类胶囊（emoji 图标为自定义校园元素）
@@ -20,9 +21,8 @@ const categories = [
 const goodsList = ref([])
 const activeCategory = ref('全部')
 const keyword = ref('')
-const courseCode = ref('')      // C2：按课程号找教材
 const loading = ref(false)
-// 本次搜索实际走的链路：''（浏览）/ 'semantic'（语义召回）/ 'keyword'（关键词兜底）/ 'course'（课程号）
+// 本次搜索实际走的链路：''（浏览）/ 'semantic'（语义召回）/ 'keyword'（关键词兜底）
 const searchMode = ref('')
 
 // 商品详情弹窗
@@ -49,7 +49,6 @@ async function loadGoods() {
     const params = {}
     if (activeCategory.value !== '全部') params.category = activeCategory.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
-    if (courseCode.value.trim()) params.courseCode = courseCode.value.trim()
     const { data } = await request.get('/goods', { params })
     goodsList.value = data
   } catch (e) {
@@ -61,8 +60,8 @@ async function loadGoods() {
 
 function selectCategory(cate) {
   activeCategory.value = cate
-  // 已有搜索条件时按新分类重搜，否则只是切换浏览
-  if (keyword.value.trim() || courseCode.value.trim()) {
+  // 已有搜索词时按新分类重搜，否则只是切换浏览
+  if (keyword.value.trim()) {
     doSearch()
   } else {
     searchMode.value = ''
@@ -77,14 +76,6 @@ function selectCategory(cate) {
  */
 async function doSearch() {
   const kw = keyword.value.trim()
-  const course = courseCode.value.trim()
-
-  // C2：填了课程号就直接按课程号找教材，不绕语义检索（课程号是精确字段，语义反而会漂）
-  if (course) {
-    await loadGoods()
-    searchMode.value = 'course'
-    return
-  }
   if (!kw) {
     searchMode.value = ''
     return loadGoods()
@@ -352,7 +343,24 @@ async function confirmOrder() {
   }
 }
 
-onMounted(loadGoods)
+onMounted(() => {
+  loadGoods()
+  openFromQuery()
+})
+
+// 从别处带 goodsId 跳过来时（如消息页的宝贝卡片），直接把详情弹窗打开
+async function openFromQuery() {
+  const goodsId = route.query.goodsId
+  if (!goodsId) return
+  try {
+    const { data } = await request.get(`/goods/${goodsId}`)
+    if (data && data.id) {
+      showDetail(data)
+    }
+  } catch (e) {
+    ElMessage.info('这件宝贝可能已经下架了')
+  }
+}
 </script>
 
 <template>
@@ -366,9 +374,6 @@ onMounted(loadGoods)
       <div class="hero-search">
         <el-input v-model="keyword" placeholder="搜校园好物，比如 MacBook、高数书" size="large" clearable
           @keyup.enter="doSearch" @clear="doSearch" />
-        <!-- C2：按课程号找教材 -->
-        <el-input v-model="courseCode" class="course-input" placeholder="课程号，如 MA101" size="large"
-          clearable @keyup.enter="doSearch" @clear="doSearch" />
         <el-button type="primary" size="large" round @click="doSearch">搜一搜</el-button>
       </div>
     </section>
@@ -383,10 +388,9 @@ onMounted(loadGoods)
     </div>
 
     <!-- 搜索链路提示：让"这次是怎么找到的"可见 -->
-    <div v-if="(keyword.trim() || courseCode.trim()) && searchMode" class="search-mode">
+    <div v-if="keyword.trim() && searchMode" class="search-mode">
       <span class="sm-tag" :class="searchMode">
-        {{ searchMode === 'semantic' ? '🤖 语义匹配 · 按意思找货'
-           : searchMode === 'course' ? '📚 按课程号找教材' : '🔤 关键词匹配' }}
+        {{ searchMode === 'semantic' ? '🤖 语义匹配 · 按意思找货' : '🔤 关键词匹配' }}
       </span>
       <span class="sm-count">共 {{ goodsList.length }} 件</span>
     </div>
@@ -593,9 +597,7 @@ onMounted(loadGoods)
   color: #8a6100;
 }
 .sm-tag.semantic { background: #e8f3ff; color: #1a5fb4; }
-.sm-tag.course { background: #eaf7ea; color: #2e7d32; }
 .sm-count { font-size: 12px; color: #999; }
-.course-input { max-width: 180px; }
 .gc-tag-course { background: #eaf7ea; color: #2e7d32; }
 
 /* C3/C4 详情弹窗里的附加区 */
