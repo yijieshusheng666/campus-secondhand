@@ -41,6 +41,8 @@ venv/
 
 # AI 服务运行时产物
 ai-service/data/index/
+# 问答埋点与审计日志（运行时追加，不进仓库）
+ai-service/data/metrics/
 
 # 智能体工作区数据（本地记忆等，不进仓库）
 .workbuddy/

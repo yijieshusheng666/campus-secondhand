@@ -28,9 +28,13 @@ class VectorStore:
     # ---- 写 ----
 
     def rebuild(self, collection: str, items: list[dict]) -> None:
-        """全量重建：items 为空即清空该集合。"""
+        """全量重建：items 为空即清空该集合。
+
+        id 保留传入时的类型：商品用 int、知识条目用 "R001" 这类字符串，
+        调用方拿到的仍是它自己传进去的类型。
+        """
         self._collections[collection] = {
-            "ids": [int(i["id"]) for i in items],
+            "ids": [i["id"] for i in items],
             "texts": [str(i.get("text", "")) for i in items],
             "vectors": (
                 np.asarray([i["vector"] for i in items], dtype=np.float32)
@@ -47,19 +51,19 @@ class VectorStore:
             entry = self._collections.get(collection)
             if entry is None or len(entry["ids"]) == 0:
                 self._collections[collection] = {
-                    "ids": [int(item["id"])],
+                    "ids": [item["id"]],
                     "texts": [str(item.get("text", ""))],
                     "vectors": vector.reshape(1, -1),
                 }
                 continue
 
-            positions = [i for i, v in enumerate(entry["ids"]) if v == int(item["id"])]
+            positions = [i for i, v in enumerate(entry["ids"]) if str(v) == str(item["id"])]
             if positions:
                 pos = positions[0]
                 entry["vectors"][pos] = vector
                 entry["texts"][pos] = str(item.get("text", ""))
             else:
-                entry["ids"].append(int(item["id"]))
+                entry["ids"].append(item["id"])
                 entry["texts"].append(str(item.get("text", "")))
                 entry["vectors"] = np.vstack([entry["vectors"], vector.reshape(1, -1)])
         self.save(collection)

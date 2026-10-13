@@ -1,0 +1,83 @@
+# 校园二手交易平台 —— 三服务编排
+#
+# 用法：
+#   1. 准备配置：demo1/src/main/resources/application.properties（gitignore，需从
+#      application-template.properties 复制并填好 MySQL 账号）
+#   2. docker compose up -d
+#   3. 前端：http://localhost:5173   AI 健康检查：http://localhost:8000/health
+#
+# 说明：数据库与前端用 host 模式跑本机（演示环境不装 MySQL 容器，省内存），
+#      需要完全隔离时把 mysql / frontend 两段改成镜像即可。
+
+services:
+  # ---- AI 服务（FastAPI）----
+  ai-service:
+    build:
+      context: .
+      dockerfile: ai-service/Dockerfile
+    container_name: campus-ai
+    ports:
+      - "8000:8000"
+    environment:
+      # 未配 LLM key 时自动降级为抽取式回答（mode=extractive），功能不中断
+      LLM_API_KEY: "${LLM_API_KEY:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4}"
+      LLM_MODEL: "${LLM_MODEL:-glm-4-flash}"
+      # 运营端接口令牌；留空表示本地演示不校验
+      OPS_TOKEN: "${OPS_TOKEN:-}"
+      EMB_FORCE_TFIDF: "${EMB_FORCE_TFIDF:-true}"
+    volumes:
+      # 知识库回写与埋点落盘，重启不丢
+      - ./ai-service/data/knowledge:/app/data/knowledge
+      - ./ai-service/data/index:/app/data/index
+      - ./ai-service/data/metrics:/app/data/metrics
+    restart: unless-stopped
+    networks:
+      - campus
+
+  # ---- 后端（Spring Boot）----
+  backend:
+    build:
+      context: ./demo1
+      dockerfile: Dockerfile
+    container_name: campus-backend
+    ports:
+      - "8080:8080"
+    environment:
+      # 覆盖 application.properties 里的值（容器内用服务名连 MySQL）
+      SPRING_DATASOURCE_URL: "jdbc:mysql://host.docker.internal:3306/secondhand?useUnicode=true&characterEncoding=utf8&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true"
+      SPRING_DATASOURCE_USERNAME: "${MYSQL_USER:-root}"
+      SPRING_DATASOURCE_PASSWORD: "${MYSQL_PASSWORD:-}"
+      AI_SERVICE_URL: "http://ai-service:8000"
+      SERVER_PORT: "8080"
+    extra_hosts:
+      # Windows / macOS 下访问宿主机的 MySQL
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      - ai-service
+    restart: unless-stopped
+    networks:
+      - campus
+
+  # ---- 前端（Vite 开发服务器 / 可切成 nginx 静态）----
+  frontend:
+    image: node:20-alpine
+    container_name: campus-frontend
+    working_dir: /app
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    # 容器内访问后端走服务名，不能用 localhost
+    command: sh -c "npm install && npx vite --host 0.0.0.0 --port 5173"
+    environment:
+      VITE_API_BASE: "/api"
+    depends_on:
+      - backend
+    networks:
+      - campus
+
+networks:
+  campus:
+    driver: bridge

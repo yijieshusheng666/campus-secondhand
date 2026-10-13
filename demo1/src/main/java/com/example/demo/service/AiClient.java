@@ -1,6 +1,7 @@
 package com.example.demo.service;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -12,6 +13,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -35,6 +37,13 @@ public class AiClient {
     private static final int CHAT_TOP_K = 4;
 
     private final RestTemplate restTemplate;
+    /**
+     * SSE 专用：读超时设为 0（永不超时）。
+     * 普通 JSON 调用要 25 秒上限防止 AI 服务卡死拖垮线程池；
+     * 但流式回答本身就可能长时间没有新数据（LLM 慢思考），
+     * 用同一个 25 秒会在回答中途被 SocketTimeout 掐断。
+     */
+    private final RestTemplate streamRestTemplate;
     private final String baseUrl;
 
     public AiClient(@Value("${ai.service.url:http://localhost:8000}") String baseUrl) {
@@ -43,6 +52,11 @@ public class AiClient {
         factory.setConnectTimeout(Duration.ofSeconds(2));
         factory.setReadTimeout(Duration.ofSeconds(25));
         this.restTemplate = new RestTemplate(factory);
+
+        SimpleClientHttpRequestFactory streamFactory = new SimpleClientHttpRequestFactory();
+        streamFactory.setConnectTimeout(Duration.ofSeconds(2));
+        streamFactory.setReadTimeout(Duration.ZERO);
+        this.streamRestTemplate = new RestTemplate(streamFactory);
     }
 
     /** 语义搜索，返回 [{goodsId, score}]；失败返回空列表。 */
@@ -182,6 +196,108 @@ public class AiClient {
         } catch (Exception e) {
             logger.warn("图片识别调用失败：{}", e.getMessage());
             return null;
+        }
+    }
+
+    /** 通用 JSON 转发（GET/POST/DELETE），供运营端等接口复用。失败返回 null。 */
+    public JSONObject json(HttpMethod method, String path, Object body) {
+        try {
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_JSON);
+            HttpEntity<String> request =
+                    body == null ? new HttpEntity<>(headers)
+                            : new HttpEntity<>(JSON.toJSONString(body), headers);
+            ResponseEntity<String> resp = restTemplate.exchange(
+                    java.net.URI.create(baseUrl + path), method, request, String.class);
+            if (!resp.getStatusCode().is2xxSuccessful() || resp.getBody() == null) {
+                return null;
+            }
+            return JSON.parseObject(resp.getBody());
+        } catch (Exception e) {
+            logger.warn("转发 {} {} 失败：{}", method, path, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 取文本响应（CSV 导出等非 JSON 接口用）。 */
+    public String text(String path) {
+        try {
+            ResponseEntity<String> resp = restTemplate.getForEntity(baseUrl + path, String.class);
+            return resp.getBody();
+        } catch (Exception e) {
+            logger.warn("取文本 {} 失败：{}", path, e.getMessage());
+            return null;
+        }
+    }
+
+    /** 取字节响应（CSV / 文件下载等二进制或大文本响应；返回 raw bytes）。 */
+    public byte[] bytes(String path) {
+        try {
+            ResponseEntity<byte[]> resp = restTemplate.getForEntity(baseUrl + path, byte[].class);
+            return resp.getBody();
+        } catch (Exception e) {
+            logger.warn("取字节 {} 失败：{}", path, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * SSE 转发：把 AI 服务的流式响应逐行透传给前端，不做缓冲，
+     * 保证前端能拿到「首字」而不是等整段生成完。
+     *
+     * 实现要点：Spring 6.x 的 RestTemplate.execute(...) 第三参是 RequestCallback（函数式接口），
+     * 它的内部类 HttpEntityRequestCallback 是 package-private 不能直接 new；用 lambda
+     * 把 HttpEntity 的 headers/body 写到 ClientHttpRequest 输出流，比 RestTemplate.exchange
+     * 更细粒度，能拿到原始 InputStream 用于 SSE 行级 flush。
+     */
+    public void streamChat(Object body, java.io.OutputStream out) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        final byte[] payload = JSON.toJSONString(body).getBytes(StandardCharsets.UTF_8);
+
+        org.springframework.web.client.ResponseExtractor<Void> extractor = response -> {
+            try (java.io.BufferedReader reader = new java.io.BufferedReader(
+                    new java.io.InputStreamReader(response.getBody(), StandardCharsets.UTF_8))) {
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    // ⚠️ 空行不能丢：SSE 用「空行」作为事件边界，
+                    // 浏览器 EventSource / fetch 流解析都靠它派发事件。
+                    // 之前这里写 if (line.isEmpty()) continue，把 \n\n 压成 \n，
+                    // 结果前端一个事件都收不到（实测 38 个事件全糊在一起）。
+                    out.write((line + "\n").getBytes(StandardCharsets.UTF_8));
+                    out.flush();
+                }
+            }
+            return null;
+        };
+
+        org.springframework.web.client.RequestCallback callback = req -> {
+            // 1. 把 HttpHeaders 拷到 ClientHttpRequest（包含 Content-Type 等）
+            headers.forEach((k, v) -> req.getHeaders().addAll(k, v));
+            // 2. 把 body 写入输出流，并显式 flush，避免缓冲区卡住
+            req.getBody().write(payload);
+            req.getBody().flush();
+        };
+
+        try {
+            streamRestTemplate.execute(baseUrl + "/ai/chat/stream", HttpMethod.POST, callback, extractor);
+        } catch (Exception e) {
+            // 不能让异常冒泡：StreamingResponseBody 已经提交了 text/event-stream 响应头，
+            // 此时再抛异常 Spring 会试图往 SSE 流里写 JSON，抛
+            // HttpMessageNotWritableException（前端只看到 HTTP 500 + 空 body）。
+            // 正确做法：自己吞掉，转成一条 SSE done 事件（unavailable 模式），
+            // 让前端按既有逻辑回退到关键词推荐 / 本地规则。
+            logger.warn("SSE 流式转发失败，降级为不可用：{}", e.getMessage());
+            String json = "{\"success\":false,\"available\":false,\"mode\":\"unavailable\","
+                    + "\"message\":\"AI 服务不可用\"}";
+            String event = "event: error\n"
+                    + "data: " + json + "\n\n";
+            try {
+                out.write(event.getBytes(StandardCharsets.UTF_8));
+                out.flush();
+            } catch (java.io.IOException ignored) {
+                // 前端已断开，无需再写
+            }
         }
     }
 

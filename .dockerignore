@@ -1,0 +1,18 @@
+# 后端镜像构建产物
+demo1/target/
+demo1/uploads/
+demo1/.mvn/wrapper/maven-wrapper.jar
+
+# AI 服务镜像构建上下文里的运行时目录
+ai-service/data/index/
+ai-service/data/metrics/
+ai-service/**/__pycache__/
+ai-service/.pytest_cache/
+
+# 前端
+frontend/node_modules/
+frontend/dist/
+
+# 环境变量
+.env
+*.env.local

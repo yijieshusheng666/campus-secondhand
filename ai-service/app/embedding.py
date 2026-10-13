@@ -1,6 +1,7 @@
 """文本向量化：优先本地语义模型，失败时降级为 jieba 词袋哈希。"""
 
 import logging
+import os
 
 import numpy as np
 
@@ -41,6 +42,43 @@ def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
     return matrix / norms
 
 
+def _local_model_ready(model_name: str) -> bool:
+    """模型是否已完整缓存到本地。
+
+    先做这个检查再 import sentence_transformers：它的 import 链会连带拉起
+    tensorflow，空跑一次要十几秒，而需求要求首字响应 ≤1 秒。模型没缓存就直接
+    判定降级，不去做那次昂贵的 import。
+
+    注意：只看目录是否存在是不够的 —— 下载失败会留下空的 models--xxx 目录，
+    必须确认快照里同时有 config.json 和权重文件才算就绪。
+    """
+    if os.path.isdir(model_name):          # 直接给了本地路径
+        return True
+
+    folder = "models--" + model_name.replace("/", "--")
+    roots = [
+        os.getenv("HF_HOME"),
+        os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub"),
+        os.path.join(os.path.expanduser("~"), ".cache", "huggingface"),
+    ]
+    for base in roots:
+        if not base:
+            continue
+        snapshots = os.path.join(base, folder, "snapshots")
+        if not os.path.isdir(snapshots):
+            continue
+        for snapshot in os.listdir(snapshots):
+            snap_dir = os.path.join(snapshots, snapshot)
+            if not os.path.isdir(snap_dir):
+                continue
+            if not os.path.exists(os.path.join(snap_dir, "config.json")):
+                continue
+            files = os.listdir(snap_dir)
+            if any(f.endswith((".safetensors", ".bin")) for f in files):
+                return True
+    return False
+
+
 class Embedder:
     def __init__(self):
         self._model = None
@@ -50,8 +88,14 @@ class Embedder:
     # ---- 内部：模式解析与惰性加载 ----
 
     def _load_semantic(self):
+        if not _local_model_ready(settings.emb_model):
+            raise RuntimeError(f"本地未缓存模型 {settings.emb_model}，跳过向量模式")
         from sentence_transformers import SentenceTransformer
-        self._model = SentenceTransformer(settings.emb_model)
+        # 离线加载：网络不可达时 sentence-transformers 会重试 5 次、每次 10 秒，
+        # 启动要卡 3 分钟，直接违背需求里的"首字响应 ≤1 秒"。离线快速失败后降级词袋。
+        os.environ.setdefault("HF_HUB_OFFLINE", "1")
+        os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+        self._model = SentenceTransformer(settings.emb_model, local_files_only=True)
 
     def _load_hasher(self):
         from sklearn.feature_extraction.text import HashingVectorizer

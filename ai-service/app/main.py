@@ -4,7 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.deps import knowledge
-from app.routers import assist, chat, embed, health, index, moderate, search, vision
+from app.routers import assist, chat, chat_stream, embed, health, index, moderate, ops, search, vision
 
 
 @asynccontextmanager
@@ -28,6 +28,8 @@ app.include_router(embed.router)
 app.include_router(index.router)
 app.include_router(search.router)
 app.include_router(chat.router)
+app.include_router(chat_stream.router)
 app.include_router(assist.router)
 app.include_router(moderate.router)
 app.include_router(vision.router)
+app.include_router(ops.router)

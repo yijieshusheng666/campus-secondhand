@@ -39,6 +39,29 @@ class Settings:
         self.index_dir = os.getenv("INDEX_DIR", os.path.join(BASE_DIR, "data", "index"))
         self.faq_path = os.getenv("FAQ_PATH", os.path.join(BASE_DIR, "data", "faq.json"))
 
+        # —— 知识库（RAG）——
+        self.knowledge_dir = os.getenv("KNOWLEDGE_DIR", os.path.join(BASE_DIR, "data", "knowledge"))
+        self.kb_collection = os.getenv("KB_COLLECTION", "kb")
+        # 两路召回各自的候选数：融合前尽量多召回，重排再收敛
+        self.bm25_top_k = int(os.getenv("BM25_TOP_K", "20"))
+        self.vec_top_k = int(os.getenv("VEC_TOP_K", "20"))
+        self.vec_min_score = float(os.getenv("VEC_MIN_SCORE", "0.0"))
+        # RRF 平滑常数：越大越"温和"，名次差异被压得越小
+        self.rrf_k = int(os.getenv("RRF_K", "60"))
+        # 重排时相对最高分保留的比例
+        self.rerank_min_ratio = float(os.getenv("RERANK_MIN_RATIO", "0.4"))
+        # 绝对可信度参照值：最高向量分低于它时，判定"相对排第一不可信"，整体下调置信度
+        self.vec_confidence_ref = float(os.getenv("VEC_CONFIDENCE_REF", "0.25"))
+        self.max_hits = int(os.getenv("MAX_HITS", "4"))
+        # 置信度低于该值强制拒答（需求 §2.1.3）
+        self.refuse_threshold = float(os.getenv("REFUSE_THRESHOLD", "0.35"))
+        # 多轮对话保留轮数（需求 §2.1.1：最近 3 轮）
+        self.history_turns = int(os.getenv("HISTORY_TURNS", "3"))
+        # 毕业季 / 开学季加权检索（需求 §2.2.2）
+        self.season_boost = os.getenv("SEASON_BOOST", "true").lower() == "true"
+        # 运营接口令牌：留空表示本地演示不校验，配上后要求请求头 X-Ops-Token 一致
+        self.ops_token = os.getenv("OPS_TOKEN", "")
+
     @property
     def llm_enabled(self) -> bool:
         """三项都配齐才认为云端生成可用，否则走抽取式降级。"""

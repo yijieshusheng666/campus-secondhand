@@ -2,6 +2,8 @@ package com.example.demo.controller;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -10,13 +12,20 @@ import java.util.List;
 import java.util.Map;
 
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.StreamingResponseBody;
 
 import com.alibaba.fastjson2.JSONArray;
 import com.alibaba.fastjson2.JSONObject;
@@ -366,6 +375,129 @@ public class AiController {
         result.put("message", "参考" + basis + "，建议定价 ¥"
                 + median.stripTrailingZeros().toPlainString());
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * SSE 流式转发：不缓冲，把 AI 服务的流逐行透传给前端，
+     * 保证「首字响应 ≤1 秒」在跨服务调用后依然成立。
+     */
+    @PostMapping("/chat/stream")
+    public ResponseEntity<StreamingResponseBody> chatStream(
+            @RequestBody(required = false) Map<String, Object> body) {
+        StreamingResponseBody stream = out ->
+                aiClient.streamChat(body == null ? Map.of() : body, out);
+        return ResponseEntity.ok()
+                .contentType(MediaType.TEXT_EVENT_STREAM)
+                .body(stream);
+    }
+
+    // ---- 运营端代理（知识库管理与统计）----
+
+    @GetMapping("/ops/kb/shards")
+    public ResponseEntity<?> kbShards() {
+        return wrapOrFallback(aiClient.json(HttpMethod.GET, "/ai/ops/kb/shards", null));
+    }
+
+    @GetMapping("/ops/kb/entries")
+    public ResponseEntity<?> kbEntries(@RequestParam(required = false) String shard,
+                                      @RequestParam(name = "q", required = false) String keyword) {
+        StringBuilder path = new StringBuilder("/ai/ops/kb/entries");
+        boolean first = true;
+        if (shard != null && !shard.isBlank()) {
+            path.append(first ? "?" : "&").append("shard=").append(shard);
+            first = false;
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            path.append(first ? "?" : "&").append("q=").append(URLEncoder.encode(keyword, StandardCharsets.UTF_8));
+        }
+        return wrapOrFallback(aiClient.json(HttpMethod.GET, path.toString(), null));
+    }
+
+    @PostMapping("/ops/kb/entries")
+    public ResponseEntity<?> kbSave(@RequestBody Map<String, Object> body) {
+        return wrapOrFallback(aiClient.json(HttpMethod.POST, "/ai/ops/kb/entries", body));
+    }
+
+    @PostMapping("/ops/kb/reindex")
+    public ResponseEntity<?> kbReindex() {
+        return wrapOrFallback(aiClient.json(HttpMethod.POST, "/ai/ops/kb/reindex", Map.of()));
+    }
+
+    @DeleteMapping("/ops/kb/entries/{id}")
+    public ResponseEntity<?> kbDelete(@PathVariable("id") String id) {
+        return wrapOrFallback(aiClient.json(HttpMethod.DELETE, "/ai/ops/kb/entries/" + id, null));
+    }
+
+    @PostMapping("/ops/kb/import")
+    public ResponseEntity<?> kbImport(@RequestBody Map<String, Object> body) {
+        return wrapOrFallback(aiClient.json(HttpMethod.POST, "/ai/ops/kb/import", body));
+    }
+
+    /** 审计日志查询（运营端可看谁在什么时候改了哪条）。 */
+    @GetMapping("/ops/kb/audit")
+    public ResponseEntity<?> kbAudit(@RequestParam(defaultValue = "50") int limit) {
+        return wrapOrFallback(aiClient.json(HttpMethod.GET,
+                "/ai/ops/kb/audit?limit=" + limit, null));
+    }
+
+    /** 知识库 CSV 导出：透传 AI 服务原始字节，带 Content-Disposition 触发浏览器下载。 */
+    @GetMapping("/ops/kb/entries.csv")
+    public ResponseEntity<?> kbExport() {
+        byte[] body = aiClient.bytes("/ai/ops/kb/entries.csv");
+        if (body == null) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false, "available", false, "message", "AI 服务不可用"));
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.setContentDispositionFormData("attachment", "knowledge.csv");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(new ByteArrayResource(body));
+    }
+
+    @GetMapping("/ops/stats/summary")
+    public ResponseEntity<?> statsSummary() {
+        return wrapOrFallback(aiClient.json(HttpMethod.GET, "/ai/ops/stats/summary", null));
+    }
+
+    @GetMapping("/ops/stats/top-questions")
+    public ResponseEntity<?> statsTop(@RequestParam(defaultValue = "10") int limit) {
+        return wrapOrFallback(aiClient.json(HttpMethod.GET,
+                "/ai/ops/stats/top-questions?limit=" + limit, null));
+    }
+
+    @GetMapping("/ops/stats/misses")
+    public ResponseEntity<?> statsMisses(@RequestParam(defaultValue = "50") int limit) {
+        return wrapOrFallback(aiClient.json(HttpMethod.GET,
+                "/ai/ops/stats/misses?limit=" + limit, null));
+    }
+
+    /** 拒答样本 CSV 导出：同上，原始字节透传。 */
+    @GetMapping("/ops/stats/misses.csv")
+    public ResponseEntity<?> statsMissesCsv() {
+        byte[] body = aiClient.bytes("/ai/ops/stats/misses.csv");
+        if (body == null) {
+            return ResponseEntity.ok(Map.of(
+                    "success", false, "available", false, "message", "AI 服务不可用"));
+        }
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.parseMediaType("text/csv"));
+        headers.setContentDispositionFormData("attachment", "misses.csv");
+        return ResponseEntity.ok()
+                .headers(headers)
+                .body(new ByteArrayResource(body));
+    }
+
+    private ResponseEntity<?> wrapOrFallback(JSONObject resp) {
+        if (resp == null) {
+            Map<String, Object> error = new LinkedHashMap<>();
+            error.put("success", false);
+            error.put("available", false);
+            error.put("message", "AI 服务不可用，请确认 8000 端口已启动");
+            return ResponseEntity.ok(error);
+        }
+        return ResponseEntity.ok(resp);
     }
 
     /** 统一包装 AI 服务响应；服务不可用时给出 available=false，前端据此提示。 */

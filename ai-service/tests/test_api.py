@@ -7,19 +7,21 @@ def test_health_ok(client):
 def test_knowledge_base_loads_and_retrieves(client):
     from app.deps import knowledge
 
-    assert len(knowledge.entries) >= 20
+    assert len(knowledge.entries) >= 60          # 5 个分片
 
-    hits = knowledge.search("怎么退款", top_k=3)
+    hits, trace = knowledge.search("怎么退款", top_k=3)
     assert hits, "「怎么退款」应能命中知识库"
-    assert any("退款" in h["title"] or "退款" in h["snippet"] for h in hits)
+    assert any("退款" in hit.title for hit in hits)
+    assert trace["intents"] == [] or "售后" in trace["intents"]
 
 
 def test_knowledge_search_returns_score(client):
     from app.deps import knowledge
 
-    hits = knowledge.search("怎么发布闲置", top_k=3)
+    hits, _ = knowledge.search("怎么发布二手商品", top_k=3)
     assert hits
-    assert hits[0]["score"] > 0
+    assert hits[0].confidence > 0
+    assert hits[0].evidence, "每条命中都应带可解释的依据"
 
 
 def test_embed_returns_vectors(client):
@@ -73,12 +75,13 @@ def test_chat_with_empty_question_still_answers(client):
 
 
 def test_chat_without_context_skips_llm(client):
-    """检索为空时不调模型：返回模板兜底，避免凭空生成。"""
+    """检索为空时不调模型：强制拒答，避免凭空生成。"""
     resp = client.post("/ai/chat", json={"question": "量子纠缠退相干是怎么回事", "top_k": 3})
     assert resp.status_code == 200
     body = resp.json()
     assert body["sources"] == []
-    assert body["mode"] == "extractive"
+    assert body["mode"] == "refused"
+    assert body["refused"] is True
     assert body["answer"]
 
 
