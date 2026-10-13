@@ -178,11 +178,6 @@ const statusTag = {
   '仲裁中': 'warning'
 }
 
-function getImageUrl(path) {
-  if (!path) return ''
-  return path.startsWith('http') ? path : path
-}
-
 function formatTime(t) {
   if (!t) return ''
   return String(t).replace('T', ' ').slice(0, 19)

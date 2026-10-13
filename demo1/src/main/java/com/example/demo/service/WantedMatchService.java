@@ -33,6 +33,8 @@ public class WantedMatchService {
     private static final double RELATIVE_FLOOR = 0.35;
     /** 商品发布后最多提示几条命中的求购 */
     private static final int WANTED_HINT_LIMIT = 5;
+    /** 2 字滑窗最多切多少片，防止长文本产生过多无意义片段 */
+    private static final int GRAM_LIMIT = 40;
 
     @Autowired
     private AiClient aiClient;
@@ -102,7 +104,7 @@ public class WantedMatchService {
                     && goods.getPrice().compareTo(wanted.getMaxPrice()) <= 0) {
                 score += 1;   // 在预算内
             }
-            for (String gram : grams(wanted.getTitle())) {
+            for (String gram : KeywordUtil.grams(wanted.getTitle(), GRAM_LIMIT)) {
                 if (goodsText.contains(gram)) {
                     score += 2;   // 标题关键词命中
                 }
@@ -144,7 +146,7 @@ public class WantedMatchService {
 
     /** 关键词兜底：沿用项目里原有的 2 字滑窗打分思路 */
     private List<Long> keywordCandidates(String query, int limit) {
-        List<String> grams = grams(query);
+        List<String> grams = KeywordUtil.grams(query, GRAM_LIMIT);
         Map<Long, Integer> scores = new LinkedHashMap<>();
         for (Goods goods : goodsRepository.findAll()) {
             if ("已售".equals(goods.getStatus())) {
@@ -174,19 +176,7 @@ public class WantedMatchService {
         return ids;
     }
 
-    /** 2 字滑窗切分，用于中文关键词兜底匹配 */
-    private List<String> grams(String text) {
-        List<String> grams = new ArrayList<>();
-        if (text == null) {
-            return grams;
-        }
-        String cleaned = text.replaceAll("[\\s,，。！!？?、；;：:\"'（）()【】\\[\\]]", "");
-        for (int i = 0; i + 2 <= cleaned.length() && grams.size() < 40; i++) {
-            grams.add(cleaned.substring(i, i + 2));
-        }
-        return grams;
-    }
-
+    /** 2 字滑窗切分见 KeywordUtil：与定价样本补扫共用同一套规则 */
     private String join(String... parts) {
         StringBuilder builder = new StringBuilder();
         for (String part : parts) {

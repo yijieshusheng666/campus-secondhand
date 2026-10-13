@@ -1,5 +1,3 @@
-import numpy as np
-
 from app.vector_store import VectorStore
 
 

@@ -97,10 +97,6 @@ def _parse(content: str) -> dict:
     return {"title": "", "category": "", "condition": "", "description": ""}
 
 
-def to_data_uri(image_base64: str, mime: str) -> str:
-    return f"data:{mime};base64,{image_base64}"
-
-
 def raw_size(image_base64: str) -> int:
     try:
         return len(base64.b64decode(image_base64))

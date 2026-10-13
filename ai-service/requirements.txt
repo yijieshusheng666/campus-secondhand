@@ -6,3 +6,4 @@ httpx
 sentence-transformers
 jieba
 scikit-learn
+python-dotenv

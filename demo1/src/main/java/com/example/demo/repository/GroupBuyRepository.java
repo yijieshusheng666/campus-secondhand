@@ -11,6 +11,4 @@ public interface GroupBuyRepository extends JpaRepository<GroupBuy, Long> {
     List<GroupBuy> findByStatusOrderByCreatedAtDesc(String status);
 
     List<GroupBuy> findByGoodsIdAndStatusOrderByCreatedAtDesc(Long goodsId, String status);
-
-    List<GroupBuy> findByBuildingAndStatusOrderByCreatedAtDesc(String building, String status);
 }

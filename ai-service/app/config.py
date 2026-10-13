@@ -3,6 +3,17 @@ import os
 # ai-service/app/config.py -> ai-service/
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+# 显式加载 ai-service/.env。不加载的话，README 里让用户写的 .env 会被静默忽略
+# ——「改了配置没反应」是最难排查的一类问题。只从本目录读，避免误读上级目录的 .env；
+# override=False 表示已存在的环境变量优先（方便临时覆盖做对照实验）。
+try:
+    from dotenv import load_dotenv
+except ImportError:  # 没装 python-dotenv 时退化为纯环境变量，功能不受影响
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv(os.path.join(BASE_DIR, ".env"), override=False)
+
 
 class Settings:
     """全局配置：所有可调项集中在此，均可用环境变量覆盖。"""

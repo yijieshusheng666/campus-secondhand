@@ -13,8 +13,6 @@ const loading = ref(false)
 const rulingNote = ref({})     // { [disputeId]: 裁定说明 }
 const submitting = ref(0)
 
-const REASONS = ['货不对板', '未收到货', '卖家拒绝退款', '其他']
-
 async function loadDisputes() {
   if (!user.value) return
   loading.value = true

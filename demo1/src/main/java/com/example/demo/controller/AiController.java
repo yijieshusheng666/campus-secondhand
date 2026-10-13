@@ -23,6 +23,7 @@ import com.alibaba.fastjson2.JSONObject;
 import com.example.demo.entity.Goods;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.service.AiClient;
+import com.example.demo.service.KeywordUtil;
 
 /**
  * AI 相关业务接口。语义召回在 Python 服务完成，过滤与回填在本层完成，
@@ -39,6 +40,8 @@ public class AiController {
     private static final int MIN_PRICE_SAMPLES = 2;
     /** 定价样本的相对分下限：低于「最高分 × 该系数」的同类样本不参与统计 */
     private static final double PRICE_RELATIVE_FLOOR = 0.35;
+    /** 定价补扫的关键词切分上限 */
+    private static final int PRICE_GRAM_LIMIT = 20;
 
     @Autowired
     private AiClient aiClient;
@@ -267,7 +270,7 @@ public class AiController {
                 candidateScores.put(id.longValue(), value);
             }
         }
-        List<String> grams = grams(sampleQuery);
+        List<String> grams = KeywordUtil.grams(sampleQuery, PRICE_GRAM_LIMIT);
         for (Goods goods : goodsRepository.findAll()) {
             if (goods.getPrice() == null || grams.isEmpty()) {
                 continue;
@@ -378,18 +381,7 @@ public class AiController {
         return result;
     }
 
-    /** 定价用的关键词切分：2 字滑窗，与项目原有的中文匹配思路一致。 */
-    private static List<String> grams(String text) {
-        List<String> grams = new ArrayList<>();
-        if (text == null) {
-            return grams;
-        }
-        String cleaned = text.replaceAll("[\\s,，。！!？?、；;：:\"'（）()【】\\[\\]]", "");
-        for (int i = 0; i + 2 <= cleaned.length() && grams.size() < 20; i++) {
-            grams.add(cleaned.substring(i, i + 2));
-        }
-        return grams;
-    }
+    /** 定价用的关键词切分：见 KeywordUtil（与求购撮合共用同一套切分规则）。 */
 
     private static String text(Map<String, Object> body, String key) {
         if (body == null || body.get(key) == null) {
