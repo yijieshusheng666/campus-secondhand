@@ -56,7 +56,20 @@ async function onPublish() {
   try {
     const { data } = await request.post('/goods', formData)
     if (data.success) {
-      ElMessage.success('发布成功')
+      // C1：发布后立刻反向撮合——看看有没有同学正在求购这件东西
+      let hint = '发布成功'
+      try {
+        const matched = await request.get('/wanted/match-for-goods', {
+          params: { goodsId: data.goodsId }
+        })
+        const count = matched.data?.data?.length || 0
+        if (count > 0) {
+          hint = `发布成功！有 ${count} 条求购需求正在找类似的宝贝，去「求购」页看看`
+        }
+      } catch (e) {
+        // 撮合查询失败不影响发布结果
+      }
+      ElMessage.success({ message: hint, duration: hint.length > 6 ? 3500 : 2000 })
       router.push('/user')
     } else {
       ElMessage.error('发布失败')

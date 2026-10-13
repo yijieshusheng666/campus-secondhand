@@ -10,6 +10,7 @@ const router = useRouter()
 
 const navs = [
   { path: '/', label: '首页' },
+  { path: '/wanted', label: '求购' },
   { path: '/messages', label: '消息' },
   { path: '/publish', label: '发布商品' },
   { path: '/orders', label: '我的订单' },

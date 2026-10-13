@@ -47,11 +47,23 @@ public class AiClient {
 
     /** 语义搜索，返回 [{goodsId, score}]；失败返回空列表。 */
     public List<Map<String, Object>> search(String query, int topK) {
+        return search(query, topK, null);
+    }
+
+    /**
+     * 语义搜索（可指定最低相似度）。
+     * minScore 传 null 时用 AI 服务按模式标定的默认阈值；
+     * 求购撮合这类"发现"场景会显式传 0，改为在 Java 侧按相对分排序取头部。
+     */
+    public List<Map<String, Object>> search(String query, int topK, Double minScore) {
         List<Map<String, Object>> results = new ArrayList<>();
         try {
             Map<String, Object> body = new HashMap<>();
             body.put("query", query);
             body.put("top_k", topK);
+            if (minScore != null) {
+                body.put("min_score", minScore);
+            }
 
             JSONObject resp = post("/ai/search", body);
             if (resp == null) {
