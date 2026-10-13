@@ -16,6 +16,15 @@ const input = ref('')
 const loading = ref(false)
 const bodyRef = ref(null)
 
+// A5 助手：对话摘要 / 议价话术
+const assistVisible = ref(false)
+const assistLoading = ref(false)
+const assistType = ref('')      // 'summary' | 'negotiate'
+const assistMode = ref('')
+const assistSummary = ref('')
+const assistPoints = ref([])
+const assistScripts = ref([])
+
 let timer = null
 
 function formatTime(t) {
@@ -117,6 +126,100 @@ async function sendMessage() {
   }
 }
 
+async function loadActiveGoods() {
+  if (!active.value) return null
+  try {
+    const { data } = await request.get(`/goods/${active.value.goodsId}`)
+    return data
+  } catch (e) {
+    return null
+  }
+}
+
+// 把当前会话整理成 AI 服务认识的对话记录（mine = 我发的）
+function currentTranscript() {
+  return messages.value
+    .filter(m => m.content)
+    .map(m => ({ role: m.fromUserId === user.id ? 'mine' : 'peer', content: m.content }))
+}
+
+// A5-1 对话摘要：总结与卖家的长对话，抽价格/见面约定/待确认事项
+async function doSummarize() {
+  if (!messages.value.length) {
+    ElMessage.warning('这个会话还没有消息，先聊两句吧')
+    return
+  }
+  assistType.value = 'summary'
+  assistVisible.value = true
+  assistLoading.value = true
+  assistSummary.value = ''
+  assistPoints.value = []
+  assistMode.value = ''
+  try {
+    const goods = await loadActiveGoods()
+    const { data } = await request.post('/ai/summarize', {
+      messages: currentTranscript(),
+      goodsTitle: goods?.title || active.value.goodsTitle || '',
+      goodsPrice: goods?.price ?? null
+    })
+    if (!data.available) {
+      ElMessage.error('AI 服务未启动，摘要暂时不可用')
+      assistVisible.value = false
+      return
+    }
+    assistSummary.value = data.summary
+    assistPoints.value = data.points || []
+    assistMode.value = data.mode
+  } catch (e) {
+    ElMessage.error('摘要生成失败')
+    assistVisible.value = false
+  } finally {
+    assistLoading.value = false
+  }
+}
+
+// A5-2 议价话术：按商品价格给三档可直接发送的说法
+async function doNegotiate() {
+  assistType.value = 'negotiate'
+  assistVisible.value = true
+  assistLoading.value = true
+  assistScripts.value = []
+  assistMode.value = ''
+  try {
+    const goods = await loadActiveGoods()
+    const { data } = await request.post('/ai/negotiate', {
+      goodsTitle: goods?.title || active.value.goodsTitle || '',
+      goodsPrice: goods?.price ?? null,
+      description: goods?.description || ''
+    })
+    if (!data.available) {
+      ElMessage.error('AI 服务未启动，话术暂时不可用')
+      assistVisible.value = false
+      return
+    }
+    assistScripts.value = data.scripts || []
+    assistMode.value = data.mode
+  } catch (e) {
+    ElMessage.error('话术生成失败')
+    assistVisible.value = false
+  } finally {
+    assistLoading.value = false
+  }
+}
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text)
+    ElMessage.success('已复制，去发给卖家吧')
+  } catch (e) {
+    ElMessage.warning('复制失败，请手动选中文字')
+  }
+}
+
+function modeText(mode) {
+  return mode === 'api' ? 'AI 生成' : '规则模板'
+}
+
 onMounted(async () => {
   if (!user) return
   await loadConversations()
@@ -158,8 +261,14 @@ onUnmounted(() => {
       <section class="chat-area">
         <template v-if="active">
           <div class="chat-head">
-            <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
-            <div class="chat-goods">宝贝：{{ active.goodsTitle || '—' }}</div>
+            <div class="chat-head-main">
+              <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
+              <div class="chat-goods">宝贝：{{ active.goodsTitle || '—' }}</div>
+            </div>
+            <div class="chat-actions">
+              <el-button size="small" round @click="doSummarize">AI 摘要</el-button>
+              <el-button size="small" round type="primary" plain @click="doNegotiate">帮我砍价</el-button>
+            </div>
           </div>
 
           <div class="chat-body" ref="bodyRef" v-loading="loading">
@@ -181,6 +290,31 @@ onUnmounted(() => {
         </div>
       </section>
     </div>
+
+    <!-- A5 助手结果：对话摘要 / 议价话术 -->
+    <el-dialog v-model="assistVisible" :title="assistType === 'summary' ? '对话摘要' : '议价话术'"
+      width="520px" round>
+      <div v-loading="assistLoading" class="assist-body">
+        <template v-if="assistType === 'summary'">
+          <p class="assist-summary">{{ assistSummary }}</p>
+          <ul class="assist-points">
+            <li v-for="(p, i) in assistPoints" :key="i">{{ p }}</li>
+          </ul>
+        </template>
+        <template v-else>
+          <div class="assist-tip">按价格递进的三档话术，点「复制」直接发给卖家：</div>
+          <div v-for="(s, i) in assistScripts" :key="i" class="script-item">
+            <div class="script-label">{{ s.label }}</div>
+            <div class="script-text">{{ s.text }}</div>
+            <el-button size="small" round @click="copyText(s.text)">复制</el-button>
+          </div>
+        </template>
+      </div>
+      <template #footer>
+        <span v-if="assistMode" class="assist-mode">{{ modeText(assistMode) }}</span>
+        <el-button @click="assistVisible = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -254,8 +388,31 @@ onUnmounted(() => {
   padding: 14px 18px;
   border-bottom: 1px solid #f0f0f0;
   background: linear-gradient(135deg, #fff8e0, #ffffff);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
 }
+.chat-head-main { min-width: 0; }
+.chat-actions { flex-shrink: 0; display: flex; gap: 8px; }
 .chat-peer { font-weight: bold; font-size: 15px; color: var(--ink-color); }
+
+/* A5 助手结果面板 */
+.assist-body { min-height: 60px; }
+.assist-summary { font-size: 14px; line-height: 1.7; color: var(--ink-color); margin: 0 0 10px; }
+.assist-points { margin: 0; padding-left: 18px; font-size: 13px; color: #666; line-height: 1.9; }
+.assist-tip { font-size: 12px; color: #999; margin-bottom: 10px; }
+.script-item {
+  position: relative;
+  padding: 10px 12px;
+  border: 1px solid #f0f0f0;
+  border-radius: 10px;
+  margin-bottom: 10px;
+  background: #fbfbfb;
+}
+.script-label { font-size: 12px; font-weight: 600; color: #8a6100; margin-bottom: 4px; }
+.script-text { font-size: 13px; line-height: 1.6; color: #444; margin-bottom: 8px; }
+.assist-mode { font-size: 12px; color: #bbb; margin-right: 10px; }
 .chat-goods { font-size: 12px; color: #8a6100; margin-top: 4px; }
 .chat-body {
   flex: 1;

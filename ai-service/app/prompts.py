@@ -25,3 +25,46 @@ def build_extractive_answer(snippets: list[str]) -> str:
 
 def build_context(snippets: list[str]) -> str:
     return "\n".join(f"- {s}" for s in snippets)
+
+
+# ---- P1 助手类能力（A5）----
+
+SUMMARY_QA = """下面是校园二手平台上买家与卖家的沟通记录，请用中文总结。
+
+要求：
+1. 先用一句话概括这段对话在谈什么；
+2. 再列出 2-4 条要点，覆盖：谈到的价格、见面约定的时间地点、还没确认的事项；
+3. 不要编造记录里没有的信息。
+
+商品：{goods}
+
+沟通记录：
+{transcript}
+
+总结："""
+
+
+NEGOTIATE_QA = """你是帮大学生在校园二手平台上讲价的助手。请针对下面这件商品写 3 条议价话术。
+
+要求：
+1. 三条分别对应「礼貌试探」「理由压价」「收尾成交」，语气自然口语化，不要显得难缠；
+2. 每条不超过 80 字，可以直接复制发给卖家；
+3. 在同校当面取货这点上做文章（省去卖家发货的麻烦）；
+4. 只输出三行，每行格式为「标签：话术」，不要其它解释。
+
+商品：{goods}
+价格：{price} 元
+描述：{description}
+
+话术："""
+
+
+def build_transcript(messages: list[dict]) -> str:
+    """把消息列表拼成 LLM 可读的对话记录。"""
+    lines = []
+    for m in messages:
+        role = "买家" if m.get("role") in ("mine", "user", "buyer", "我") else "卖家"
+        content = str(m.get("content", "")).strip()
+        if content:
+            lines.append(f"{role}：{content}")
+    return "\n".join(lines)

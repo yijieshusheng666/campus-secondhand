@@ -12,6 +12,21 @@ uvicorn app.main:app --port 8000
 
 启动后访问 http://localhost:8000/docs 查看接口文档。
 
+## HTTP 接口
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/health` | 服务状态与**实际生效**的模式（embedding / llm / 索引条数） |
+| POST | `/ai/embed` | 文本 → 向量 |
+| POST | `/ai/index` | 增量更新商品索引（按 goodsId 覆盖） |
+| POST | `/ai/index/rebuild` | 全量重建 / 清空索引 |
+| POST | `/ai/search` | 语义召回（只返回 goodsId + 分数，过滤交给 Java 侧） |
+| POST | `/ai/chat` | RAG 问答：检索 FAQ + 商品 → 生成，附引用来源（A1） |
+| POST | `/ai/summarize` | 对话摘要：规则抽取价格 / 见面约定 / 待确认事项（A5） |
+| POST | `/ai/negotiate` | 议价话术：三档可直接发送的讲价说法（A5） |
+
+`/ai/summarize` 与 `/ai/negotiate` 的 `mode` 取值：`api`（模型生成）或 `rule`（本地规则模板）。
+
 ## 环境变量
 
 | 变量 | 默认值 | 说明 |

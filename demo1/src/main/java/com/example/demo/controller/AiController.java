@@ -1,5 +1,6 @@
 package com.example.demo.controller;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
@@ -150,18 +151,79 @@ public class AiController {
 
     /** 把前端传来的多轮对话转成 AI 服务认识的 {role, content} 列表。 */
     private List<Map<String, String>> extractHistory(Map<String, Object> body) {
-        List<Map<String, String>> history = new ArrayList<>();
-        if (body == null || !(body.get("history") instanceof List<?> raw)) {
-            return history;
+        return extractTurns(body, "history");
+    }
+
+    private List<Map<String, String>> extractTurns(Map<String, Object> body, String key) {
+        List<Map<String, String>> turns = new ArrayList<>();
+        if (body == null || !(body.get(key) instanceof List<?> raw)) {
+            return turns;
         }
         for (Object item : raw) {
             if (item instanceof Map<?, ?> entry && entry.get("content") != null) {
                 Map<String, String> turn = new HashMap<>();
                 turn.put("role", entry.get("role") == null ? "user" : entry.get("role").toString());
                 turn.put("content", entry.get("content").toString());
-                history.add(turn);
+                turns.add(turn);
             }
         }
-        return history;
+        return turns;
+    }
+
+    /**
+     * A5 对话摘要：总结与卖家的沟通，抽出价格、见面约定与待确认事项。
+     * AI 服务不可用时返回 available=false。
+     */
+    @PostMapping("/summarize")
+    public ResponseEntity<?> summarize(@RequestBody(required = false) Map<String, Object> body) {
+        JSONObject resp = aiClient.summarize(
+                extractTurns(body, "messages"),
+                text(body, "goodsTitle"),
+                decimal(body, "goodsPrice"));
+        return ResponseEntity.ok(wrap(resp));
+    }
+
+    /**
+     * A5 议价话术：按商品价格给三档可直接发送的讲价话术。
+     * AI 服务不可用时返回 available=false。
+     */
+    @PostMapping("/negotiate")
+    public ResponseEntity<?> negotiate(@RequestBody(required = false) Map<String, Object> body) {
+        JSONObject resp = aiClient.negotiate(
+                text(body, "goodsTitle"),
+                decimal(body, "goodsPrice"),
+                text(body, "description"));
+        return ResponseEntity.ok(wrap(resp));
+    }
+
+    /** 统一包装 AI 服务响应；服务不可用时给出 available=false，前端据此提示。 */
+    private Map<String, Object> wrap(JSONObject resp) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        if (resp == null) {
+            result.put("available", false);
+            return result;
+        }
+        result.put("available", true);
+        result.putAll(resp);
+        return result;
+    }
+
+    private static String text(Map<String, Object> body, String key) {
+        if (body == null || body.get(key) == null) {
+            return "";
+        }
+        return body.get(key).toString();
+    }
+
+    private static BigDecimal decimal(Map<String, Object> body, String key) {
+        if (body == null || body.get(key) == null) {
+            return null;
+        }
+        try {
+            return new BigDecimal(body.get(key).toString());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 }

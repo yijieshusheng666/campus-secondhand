@@ -1,5 +1,6 @@
 package com.example.demo.service;
 
+import java.math.BigDecimal;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -110,6 +111,38 @@ public class AiClient {
             return post("/ai/chat", body);
         } catch (Exception e) {
             logger.warn("RAG 问答调用失败，前端将回退关键词客服：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 对话摘要（A5）；失败返回 null。 */
+    public JSONObject summarize(List<Map<String, String>> messages, String goodsTitle, BigDecimal goodsPrice) {
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("messages", messages);
+            body.put("goodsTitle", goodsTitle == null ? "" : goodsTitle);
+            if (goodsPrice != null) {
+                body.put("goodsPrice", goodsPrice);
+            }
+            return post("/ai/summarize", body);
+        } catch (Exception e) {
+            logger.warn("对话摘要调用失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 议价话术（A5）；失败返回 null。 */
+    public JSONObject negotiate(String goodsTitle, BigDecimal goodsPrice, String description) {
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("goodsTitle", goodsTitle == null ? "" : goodsTitle);
+            body.put("description", description == null ? "" : description);
+            if (goodsPrice != null) {
+                body.put("goodsPrice", goodsPrice);
+            }
+            return post("/ai/negotiate", body);
+        } catch (Exception e) {
+            logger.warn("议价话术调用失败：{}", e.getMessage());
             return null;
         }
     }
