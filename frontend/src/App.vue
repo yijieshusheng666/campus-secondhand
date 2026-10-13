@@ -40,9 +40,16 @@ async function syncUserRole() {
   }
 }
 
-// 路由切换时刷新登录状态（登录/退出后界面同步）
+// 路由切换时刷新登录状态（登录/退出后界面同步）。
+// 只有真的变了才更新：否则每次切页都会把 user 换成新对象，导致整个头部（含导航）重渲染。
 watch(() => route.path, () => {
-  user.value = JSON.parse(localStorage.getItem('user') || 'null')
+  const cached = JSON.parse(localStorage.getItem('user') || 'null')
+  const changed = (cached?.id ?? null) !== (user.value?.id ?? null)
+    || (cached?.username ?? null) !== (user.value?.username ?? null)
+    || (cached?.role ?? null) !== (user.value?.role ?? null)
+  if (changed) {
+    user.value = cached
+  }
 })
 
 // 悬浮智能客服：纯自控面板，不依赖任何 UI 库组件
@@ -154,6 +161,10 @@ function onLogout() {
   --ink-color: #23201a;
 }
 html, body { margin: 0; padding: 0; }
+/* 滚动条位置常驻：否则在"长页面 ↔ 短页面"之间切换时，滚动条出现/消失会让
+   文档宽度变化约 15px，整个头部（含导航栏）跟着横向平移，看起来像抖了一下。
+   overflow-y: scroll 兜底所有浏览器，scrollbar-gutter 在支持的浏览器上更干净。 */
+html { overflow-y: scroll; scrollbar-gutter: stable; }
 body {
   background: #f6f7f9;
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
