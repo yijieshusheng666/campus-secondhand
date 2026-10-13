@@ -46,6 +46,83 @@ async function loadVerifyStatus() {
 const credit = ref({ creditScore: 60, avgScore: 0, reviewCount: 0, creditLevel: '新用户' })
 const reviews = ref([])
 
+// C3 我的拼单 / C4 换物请求
+const myGroupBuys = ref([])
+const barterReceived = ref([])
+const barterSent = ref([])
+
+async function loadGroupBuys() {
+  if (!user.value) return
+  try {
+    const { data } = await request.get('/groupbuy', { params: { userId: user.value.id } })
+    myGroupBuys.value = data.data || []
+  } catch (e) {
+    // 拼单加载失败不影响页面其他部分
+  }
+}
+
+async function loadBarters() {
+  if (!user.value) return
+  try {
+    const { data } = await request.get('/barter', { params: { userId: user.value.id } })
+    barterReceived.value = data.received || []
+    barterSent.value = data.sent || []
+  } catch (e) {
+    // 换物请求加载失败不影响页面其他部分
+  }
+}
+
+async function quitGroupBuy(groupBuy) {
+  const isInitiator = groupBuy.initiatorId === user.value.id
+  try {
+    await ElMessageBox.confirm(
+      isInitiator ? '你是发起人，取消后整个拼单就结束了，确定吗？' : '确定退出这个拼单吗？',
+      isInitiator ? '取消拼单' : '退出拼单', { type: 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await request.post(`/groupbuy/${groupBuy.id}/cancel`, { userId: user.value.id })
+    if (data.success) {
+      ElMessage.success(data.message)
+      loadGroupBuys()
+    } else {
+      ElMessage.error(data.message || '操作失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '操作失败')
+  }
+}
+
+async function respondBarter(barter, accept) {
+  try {
+    await ElMessageBox.confirm(
+      accept ? '同意和对方交换吗？同意后你们自行约时间交接。' : '确定拒绝这条换物请求吗？',
+      '回应换物请求', { type: accept ? 'info' : 'warning' })
+  } catch {
+    return
+  }
+  try {
+    const { data } = await request.post(`/barter/${barter.id}/respond`, {
+      userId: user.value.id, accept
+    })
+    if (data.success) {
+      ElMessage.success(data.message)
+      loadBarters()
+    } else {
+      ElMessage.error(data.message || '操作失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '操作失败')
+  }
+}
+
+function barterStatusType(status) {
+  if (status === '已同意') return 'success'
+  if (status === '已拒绝') return 'info'
+  return 'warning'
+}
+
 async function loadReviews() {
   if (!user.value) return
   try {
@@ -300,6 +377,8 @@ onMounted(() => {
   loadSales()
   loadVerifyStatus()
   loadReviews()
+  loadGroupBuys()
+  loadBarters()
 })
 </script>
 
@@ -361,6 +440,65 @@ onMounted(() => {
           <div class="review-text">{{ r.content || '未填写评价内容' }}</div>
           <div class="review-sub">{{ r.goodsTitle }} · {{ formatTime(r.createdAt) }}</div>
         </div>
+      </el-card>
+
+      <!-- C3 我的拼单 -->
+      <el-card v-if="myGroupBuys.length" class="section-card" shadow="never">
+        <div class="section-header"><h3>我的拼单</h3></div>
+        <div v-for="gb in myGroupBuys" :key="gb.id" class="gb-row">
+          <div class="gb-row-head">
+            <span class="gb-row-title">{{ gb.goodsTitle }}</span>
+            <el-tag size="small" :type="gb.status === '拼单中' ? 'warning' : 'success'">{{ gb.status }}</el-tag>
+          </div>
+          <div class="gb-row-meta">
+            🏢 {{ gb.building }} · 已参与 {{ gb.joinedCount }}/{{ gb.targetCount }} 人
+            · 发起人 {{ gb.initiatorName }}
+          </div>
+          <div class="gb-row-members">成员：{{ gb.members.map(m => m.name).join('、') }}</div>
+          <el-button v-if="gb.status === '拼单中'" size="small" @click="quitGroupBuy(gb)">
+            {{ gb.initiatorId === user.id ? '取消拼单' : '退出拼单' }}
+          </el-button>
+        </div>
+      </el-card>
+
+      <!-- C4 换物请求 -->
+      <el-card class="section-card" shadow="never">
+        <div class="section-header">
+          <h3>换物请求</h3>
+          <span class="section-hint">别人想用东西换你的宝贝，或你想换别人的</span>
+        </div>
+        <el-empty v-if="barterReceived.length === 0 && barterSent.length === 0"
+          description="还没有换物请求" :image-size="60" />
+
+        <template v-if="barterReceived.length">
+          <div class="barter-sub">收到的（{{ barterReceived.length }}）</div>
+          <div v-for="b in barterReceived" :key="'r' + b.id" class="barter-row">
+            <div class="barter-head">
+              <span class="barter-title">
+                <b>{{ b.requesterName }}</b> 想用「{{ b.offerTitle }}」换你的「{{ b.goodsTitle }}」
+              </span>
+              <el-tag size="small" :type="barterStatusType(b.status)">{{ b.status }}</el-tag>
+            </div>
+            <div class="barter-desc" v-if="b.offerDesc">{{ b.offerDesc }}</div>
+            <div class="barter-actions" v-if="b.status === '待回应'">
+              <el-button size="small" type="primary" @click="respondBarter(b, true)">同意换物</el-button>
+              <el-button size="small" @click="respondBarter(b, false)">拒绝</el-button>
+            </div>
+          </div>
+        </template>
+
+        <template v-if="barterSent.length">
+          <div class="barter-sub">我发出的（{{ barterSent.length }}）</div>
+          <div v-for="b in barterSent" :key="'s' + b.id" class="barter-row">
+            <div class="barter-head">
+              <span class="barter-title">
+                我想用「{{ b.offerTitle }}」换「{{ b.goodsTitle }}」
+              </span>
+              <el-tag size="small" :type="barterStatusType(b.status)">{{ b.status }}</el-tag>
+            </div>
+            <div class="barter-desc" v-if="b.offerDesc">{{ b.offerDesc }}</div>
+          </div>
+        </template>
       </el-card>
 
       <!-- 我的商品 -->
@@ -485,6 +623,20 @@ onMounted(() => {
 .review-text { font-size: 13px; color: #555; line-height: 1.6; margin: 4px 0; }
 .review-sub { font-size: 11px; color: #bbb; }
 .sale-tags { display: flex; align-items: center; gap: 6px; }
+
+/* C3 我的拼单 / C4 换物请求 */
+.gb-row { padding: 10px 0; border-top: 1px solid #f0f0f0; }
+.gb-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.gb-row-title { font-size: 13px; font-weight: 600; color: var(--ink-color); }
+.gb-row-meta { font-size: 12px; color: #888; margin: 5px 0 3px; }
+.gb-row-members { font-size: 12px; color: #aaa; margin-bottom: 8px; }
+.section-hint { font-size: 12px; color: #bbb; }
+.barter-sub { font-size: 12px; color: #999; margin: 10px 0 4px; }
+.barter-row { padding: 10px 0; border-top: 1px solid #f0f0f0; }
+.barter-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.barter-title { font-size: 13px; color: #555; line-height: 1.6; }
+.barter-desc { font-size: 12px; color: #999; margin: 6px 0; line-height: 1.6; }
+.barter-actions { display: flex; gap: 8px; }
 .user-info { text-align: center; cursor: default; }
 .user-avatar { background: #ffd21e; color: #23201a; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
 .stuid { color: #999; font-size: 13px; margin-top: 4px; }

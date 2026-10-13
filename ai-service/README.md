@@ -24,8 +24,11 @@ uvicorn app.main:app --port 8000
 | POST | `/ai/chat` | RAG 问答：检索 FAQ + 商品 → 生成，附引用来源（A1） |
 | POST | `/ai/summarize` | 对话摘要：规则抽取价格 / 见面约定 / 待确认事项（A5） |
 | POST | `/ai/negotiate` | 议价话术：三档可直接发送的讲价说法（A5） |
+| POST | `/ai/moderate` | 内容风控：违禁品 / 诈骗话术 / 站外联系方式（A6） |
+| POST | `/ai/vision` | 图片识别自动发布（A3，**需要配置多模态模型**） |
 
 `/ai/summarize` 与 `/ai/negotiate` 的 `mode` 取值：`api`（模型生成）或 `rule`（本地规则模板）。
+`/ai/moderate` 的 `level` 取值：`ok` / `warn`（提示，可继续发布）/ `block`（禁止发布）。
 
 ## 环境变量
 
@@ -41,6 +44,9 @@ uvicorn app.main:app --port 8000
 | `SIM_THRESHOLD_TFIDF` | `0.20` | **tfidf 模式**的召回最低相似度（实测标定，见下） |
 | `INDEX_DIR` | `data/index` | 索引持久化目录 |
 | `FAQ_PATH` | `data/faq.json` | 知识库文件 |
+| `VISION_BASE_URL` | 空 | **A3** 多模态模型地址（OpenAI 兼容） |
+| `VISION_API_KEY` | 空 | 为空则图片识别返回不可用 |
+| `VISION_MODEL` | 空 | 如 `glm-4v-flash` |
 
 ## 降级设计
 

@@ -1,15 +1,100 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../api'
 
 const router = useRouter()
 const categories = ['电子产品', '图书教材', '生活用品', '运动户外', '二手家具', '美妆护肤']
-const form = reactive({ title: '', category: '电子产品', price: null, description: '' })
+const form = reactive({ title: '', category: '电子产品', price: null, description: '', courseCode: '' })
 const fileList = ref([])
 const uploadRef = ref(null)
 const submitting = ref(false)
+
+// A4 智能定价建议
+const priceHint = ref(null)
+const priceLoading = ref(false)
+
+// A3 图片识别
+const recognizing = ref(false)
+
+async function suggestPrice() {
+  if (!form.title.trim()) {
+    ElMessage.warning('先填商品标题，我才能找同类商品估价')
+    return
+  }
+  priceLoading.value = true
+  priceHint.value = null
+  try {
+    const { data } = await request.get('/ai/price-suggest', {
+      params: { title: form.title, category: form.category, description: form.description }
+    })
+    if (data.available) {
+      priceHint.value = data
+    } else {
+      ElMessage.info(data.message || '暂时估不出参考价')
+    }
+  } catch (e) {
+    ElMessage.error('参考价获取失败，请检查后端服务')
+  } finally {
+    priceLoading.value = false
+  }
+}
+
+function useSuggestedPrice() {
+  if (priceHint.value) {
+    form.price = Number(priceHint.value.suggested)
+    ElMessage.success('已填入建议价')
+  }
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result).split(',')[1] || '')
+    reader.onerror = reject
+    reader.readAsDataURL(file)
+  })
+}
+
+// A3：上传图片后交给多模态模型预填字段（未配置模型时会如实提示）
+async function recognizeImage() {
+  if (!fileList.value.length) {
+    ElMessage.warning('请先上传一张商品图片')
+    return
+  }
+  const raw = fileList.value[0].raw
+  recognizing.value = true
+  try {
+    const image = await fileToBase64(raw)
+    const { data } = await request.post('/ai/vision', { image, mime: raw.type || 'image/jpeg' })
+    if (!data.available) {
+      ElMessage.info({ message: data.message || '图片识别暂不可用', duration: 4000 })
+      return
+    }
+    if (data.title) form.title = data.title
+    if (data.category) form.category = data.category
+    const desc = [data.condition, data.description].filter(Boolean).join('，')
+    if (desc) form.description = desc
+    ElMessage.success(data.message || '已根据图片预填，请核对后再发布')
+  } catch (e) {
+    ElMessage.error('图片识别失败')
+  } finally {
+    recognizing.value = false
+  }
+}
+
+// A6：发布前先过一遍内容风控，block 直接拦下，warn 让用户确认
+async function checkContent() {
+  try {
+    const { data } = await request.post('/ai/moderate', {
+      title: form.title, description: form.description
+    })
+    return data
+  } catch (e) {
+    return null   // 风控服务不可用时不阻塞发布，后端还有兜底
+  }
+}
 
 onMounted(() => {
   const user = JSON.parse(localStorage.getItem('user') || 'null')
@@ -42,11 +127,28 @@ async function onPublish() {
     return
   }
 
+  // A6 内容风控
+  const risk = await checkContent()
+  if (risk && risk.level === 'block') {
+    ElMessage.error({ message: risk.message, duration: 5000 })
+    return
+  }
+  if (risk && risk.level === 'warn') {
+    try {
+      await ElMessageBox.confirm(risk.message, '内容提醒', {
+        type: 'warning', confirmButtonText: '我知道了，继续发布', cancelButtonText: '我去改改'
+      })
+    } catch {
+      return
+    }
+  }
+
   const formData = new FormData()
   formData.append('title', form.title.trim())
   formData.append('category', form.category)
   formData.append('price', form.price)
   formData.append('description', form.description.trim())
+  formData.append('courseCode', form.category === '图书教材' ? form.courseCode.trim() : '')
   formData.append('userId', user.id)
   fileList.value.forEach((f, i) => {
     formData.append('images', f.raw, `image${i}.jpg`)
@@ -94,9 +196,24 @@ async function onPublish() {
             <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
           </el-select>
         </el-form-item>
+        <!-- C2：教材类商品关联课程号，方便同学按课程找书 -->
+        <el-form-item v-if="form.category === '图书教材'" label="课程号 / 课程名">
+          <el-input v-model="form.courseCode" maxlength="30"
+            placeholder="例如：MA101 或 高等数学（同济版）" />
+          <div class="field-tip">填了之后，同学按课程号就能直接搜到这本书</div>
+        </el-form-item>
         <el-form-item label="商品价格（元）">
-          <el-input-number v-model="form.price" :min="0" :precision="2" :controls="false"
-            placeholder="请输入出售价格" style="width: 100%" />
+          <div class="price-row">
+            <el-input-number v-model="form.price" :min="0" :precision="2" :controls="false"
+              placeholder="请输入出售价格" style="flex: 1" />
+            <el-button :loading="priceLoading" @click="suggestPrice">🤖 参考价</el-button>
+          </div>
+          <div v-if="priceHint" class="price-hint" :class="{ coarse: priceHint.coarse }">
+            {{ priceHint.message }}
+            ｜区间 ¥{{ priceHint.low }} ~ ¥{{ priceHint.high }}
+            <el-button size="small" text type="primary" @click="useSuggestedPrice">用这个价</el-button>
+          </div>
+          <div v-else class="field-tip">填好标题后点「参考价」，我按同类在售商品帮你估个价</div>
         </el-form-item>
         <el-form-item label="商品描述">
           <el-input v-model="form.description" type="textarea" :rows="4"
@@ -115,6 +232,13 @@ async function onPublish() {
           >
             <el-icon size="20"><span style="font-size: 22px">+</span></el-icon>
           </el-upload>
+          <!-- A3：交给多模态模型看图预填标题/分类/成色 -->
+          <div class="ai-upload-row">
+            <el-button size="small" :loading="recognizing" @click="recognizeImage">
+              🤖 AI 识别图片并预填
+            </el-button>
+            <span class="field-tip" style="margin: 0">先用第一张图识别，结果请自行核对</span>
+          </div>
         </el-form-item>
         <el-button type="primary" class="submit-btn" :loading="submitting" @click="onPublish">提交发布</el-button>
       </el-form>
@@ -123,6 +247,11 @@ async function onPublish() {
 </template>
 
 <style scoped>
+.field-tip { font-size: 12px; color: #bbb; margin-top: 4px; line-height: 1.5; }
+.price-row { display: flex; gap: 10px; width: 100%; align-items: center; }
+.price-hint { font-size: 12px; color: #1a5fb4; margin-top: 6px; line-height: 1.6; }
+.price-hint.coarse { color: #b8860b; }
+.ai-upload-row { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .publish-page { display: flex; justify-content: center; }
 .publish-card { width: 100%; max-width: 640px; }
 .submit-btn { width: 100%; }

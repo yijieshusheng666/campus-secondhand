@@ -68,3 +68,19 @@ def build_transcript(messages: list[dict]) -> str:
         if content:
             lines.append(f"{role}：{content}")
     return "\n".join(lines)
+
+
+# ---- P4 内容风控（A6）----
+
+MODERATE_QA = """你是校园二手交易平台的内容审核助手。判断下面这条商品信息是否违规。
+
+要拦截的：违禁品（烟酒、药品、管制刀具、假证、代写代考等）、高风险交易（刷单、套现、先付定金等）。
+要提示但不拦截的：留手机号/微信号/QQ 号等站外联系方式、引导到其它平台交易。
+正常的二手商品描述一律算通过。
+
+只输出一个词：ok、warn、block
+
+标题：{title}
+描述：{description}
+
+结论："""

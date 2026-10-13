@@ -26,6 +26,10 @@ public class Goods {
     // 商品状态：在售 / 已售
     private String status = "在售";
 
+    // C2 校园场景：教材类商品关联的课程号 / 课程名，用于按课程找教材
+    @Column(name = "course_code")
+    private String courseCode;
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -95,6 +99,14 @@ public class Goods {
 
     public void setStatus(String status) {
         this.status = status;
+    }
+
+    public String getCourseCode() {
+        return courseCode;
+    }
+
+    public void setCourseCode(String courseCode) {
+        this.courseCode = courseCode;
     }
 
     public LocalDateTime getCreatedAt() {

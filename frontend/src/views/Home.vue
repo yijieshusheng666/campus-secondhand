@@ -20,8 +20,9 @@ const categories = [
 const goodsList = ref([])
 const activeCategory = ref('全部')
 const keyword = ref('')
+const courseCode = ref('')      // C2：按课程号找教材
 const loading = ref(false)
-// 本次搜索实际走的链路：''（浏览）/ 'semantic'（语义召回）/ 'keyword'（关键词兜底）
+// 本次搜索实际走的链路：''（浏览）/ 'semantic'（语义召回）/ 'keyword'（关键词兜底）/ 'course'（课程号）
 const searchMode = ref('')
 
 // 商品详情弹窗
@@ -48,6 +49,7 @@ async function loadGoods() {
     const params = {}
     if (activeCategory.value !== '全部') params.category = activeCategory.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
+    if (courseCode.value.trim()) params.courseCode = courseCode.value.trim()
     const { data } = await request.get('/goods', { params })
     goodsList.value = data
   } catch (e) {
@@ -59,8 +61,8 @@ async function loadGoods() {
 
 function selectCategory(cate) {
   activeCategory.value = cate
-  // 已有搜索词时按新分类重搜，否则只是切换浏览
-  if (keyword.value.trim()) {
+  // 已有搜索条件时按新分类重搜，否则只是切换浏览
+  if (keyword.value.trim() || courseCode.value.trim()) {
     doSearch()
   } else {
     searchMode.value = ''
@@ -75,6 +77,14 @@ function selectCategory(cate) {
  */
 async function doSearch() {
   const kw = keyword.value.trim()
+  const course = courseCode.value.trim()
+
+  // C2：填了课程号就直接按课程号找教材，不绕语义检索（课程号是精确字段，语义反而会漂）
+  if (course) {
+    await loadGoods()
+    searchMode.value = 'course'
+    return
+  }
   if (!kw) {
     searchMode.value = ''
     return loadGoods()
@@ -109,6 +119,7 @@ async function showDetail(goods) {
   detailVisible.value = true
   sellerName.value = ''
   sellerInfo.value = null
+  groupBuys.value = []
   try {
     const { data } = await request.get(`/users/${goods.userId}`)
     sellerName.value = data.username
@@ -116,6 +127,150 @@ async function showDetail(goods) {
     sellerInfo.value = data
   } catch (e) {
     // 卖家信息拿不到不影响详情展示
+  }
+  // C3：这件宝贝上正在进行的宿舍楼拼单
+  loadGroupBuys(goods.id)
+}
+
+// —— C3 宿舍楼拼单 ——
+const groupBuys = ref([])
+const buildings = ['1 栋', '2 栋', '3 栋', '5 栋', '6 栋', '7 栋', '8 栋',
+                   '9 栋', '10 栋', '11 栋', '12 栋', '研究生楼']
+const groupBuyVisible = ref(false)
+const groupBuyForm = ref({ building: '', targetCount: 3 })
+const groupBuySubmitting = ref(false)
+const joinVisible = ref(false)
+const joinForm = ref({ building: '' })
+const activeGroupBuy = ref(null)
+const joining = ref(false)
+
+async function loadGroupBuys(goodsId) {
+  try {
+    const { data } = await request.get(`/groupbuy/goods/${goodsId}`)
+    groupBuys.value = data.data || []
+  } catch (e) {
+    groupBuys.value = []
+  }
+}
+
+function requireLogin() {
+  const current = JSON.parse(localStorage.getItem('user') || 'null')
+  if (!current) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return null
+  }
+  return current
+}
+
+function openGroupBuy() {
+  const current = requireLogin()
+  if (!current) return
+  groupBuyForm.value = { building: '', targetCount: 3 }
+  groupBuyVisible.value = true
+}
+
+async function submitGroupBuy() {
+  const current = requireLogin()
+  if (!current) return
+  if (!groupBuyForm.value.building) {
+    ElMessage.warning('请选择你所在的宿舍楼')
+    return
+  }
+  groupBuySubmitting.value = true
+  try {
+    const { data } = await request.post('/groupbuy', {
+      goodsId: detailGoods.value.id,
+      initiatorId: current.id,
+      building: groupBuyForm.value.building,
+      targetCount: groupBuyForm.value.targetCount
+    })
+    if (data.success) {
+      ElMessage.success(data.message)
+      groupBuyVisible.value = false
+      loadGroupBuys(detailGoods.value.id)
+    } else {
+      ElMessage.error(data.message || '发起失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '发起失败，请检查后端服务')
+  } finally {
+    groupBuySubmitting.value = false
+  }
+}
+
+function openJoin(gb) {
+  const current = requireLogin()
+  if (!current) return
+  activeGroupBuy.value = gb
+  joinForm.value.building = gb.building
+  joinVisible.value = true
+}
+
+async function submitJoin() {
+  const current = requireLogin()
+  if (!current) return
+  joining.value = true
+  try {
+    const { data } = await request.post(`/groupbuy/${activeGroupBuy.value.id}/join`, {
+      userId: current.id,
+      building: joinForm.value.building
+    })
+    if (data.success) {
+      ElMessage.success(data.message)
+      joinVisible.value = false
+      loadGroupBuys(detailGoods.value.id)
+    } else {
+      ElMessage.error(data.message || '加入失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '加入失败，请检查后端服务')
+  } finally {
+    joining.value = false
+  }
+}
+
+// —— C4 以物换物 ——
+const barterVisible = ref(false)
+const barterForm = ref({ offerTitle: '', offerDesc: '' })
+const barterSubmitting = ref(false)
+
+function openBarter() {
+  const current = requireLogin()
+  if (!current) return
+  if (detailGoods.value && current.id === detailGoods.value.userId) {
+    ElMessage.warning('这是你自己发布的宝贝')
+    return
+  }
+  barterForm.value = { offerTitle: '', offerDesc: '' }
+  barterVisible.value = true
+}
+
+async function submitBarter() {
+  const current = requireLogin()
+  if (!current) return
+  if (!barterForm.value.offerTitle.trim()) {
+    ElMessage.warning('请填写你打算用什么来换')
+    return
+  }
+  barterSubmitting.value = true
+  try {
+    const { data } = await request.post('/barter', {
+      goodsId: detailGoods.value.id,
+      requesterId: current.id,
+      offerTitle: barterForm.value.offerTitle,
+      offerDesc: barterForm.value.offerDesc
+    })
+    if (data.success) {
+      ElMessage.success(data.message)
+      barterVisible.value = false
+    } else {
+      ElMessage.error(data.message || '发起失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '发起失败，请检查后端服务')
+  } finally {
+    barterSubmitting.value = false
   }
 }
 
@@ -211,6 +366,9 @@ onMounted(loadGoods)
       <div class="hero-search">
         <el-input v-model="keyword" placeholder="搜校园好物，比如 MacBook、高数书" size="large" clearable
           @keyup.enter="doSearch" @clear="doSearch" />
+        <!-- C2：按课程号找教材 -->
+        <el-input v-model="courseCode" class="course-input" placeholder="课程号，如 MA101" size="large"
+          clearable @keyup.enter="doSearch" @clear="doSearch" />
         <el-button type="primary" size="large" round @click="doSearch">搜一搜</el-button>
       </div>
     </section>
@@ -225,9 +383,10 @@ onMounted(loadGoods)
     </div>
 
     <!-- 搜索链路提示：让"这次是怎么找到的"可见 -->
-    <div v-if="keyword.trim() && searchMode" class="search-mode">
+    <div v-if="(keyword.trim() || courseCode.trim()) && searchMode" class="search-mode">
       <span class="sm-tag" :class="searchMode">
-        {{ searchMode === 'semantic' ? '🤖 语义匹配 · 按意思找货' : '🔤 关键词匹配' }}
+        {{ searchMode === 'semantic' ? '🤖 语义匹配 · 按意思找货'
+           : searchMode === 'course' ? '📚 按课程号找教材' : '🔤 关键词匹配' }}
       </span>
       <span class="sm-count">共 {{ goodsList.length }} 件</span>
     </div>
@@ -243,7 +402,8 @@ onMounted(loadGoods)
             <div class="gc-title" @click="showDetail(item)">{{ item.title }}</div>
             <div class="gc-tags">
               <span class="gc-tag gc-tag-school">🎓 校园面交</span>
-              <span class="gc-tag gc-tag-student">学生自用</span>
+              <span v-if="item.courseCode" class="gc-tag gc-tag-course">📚 {{ item.courseCode }}</span>
+              <span v-else class="gc-tag gc-tag-student">学生自用</span>
             </div>
             <div class="gc-bottom">
               <div class="gc-price">¥<span class="gc-price-num">{{ item.price }}</span></div>
@@ -268,6 +428,7 @@ onMounted(loadGoods)
         <div class="detail-tags">
           <span class="gc-tag gc-tag-school">🎓 校园面交</span>
           <span class="gc-tag gc-tag-cate">{{ detailGoods.category }}</span>
+          <span v-if="detailGoods.courseCode" class="gc-tag gc-tag-course">📚 {{ detailGoods.courseCode }}</span>
         </div>
         <div class="detail-seller">
           卖家：{{ sellerName || '—' }}
@@ -278,12 +439,95 @@ onMounted(loadGoods)
         </div>
         <div class="detail-desc-title">宝贝描述</div>
         <p class="detail-desc">{{ detailGoods.description || '暂无描述' }}</p>
+
+        <!-- C3 宿舍楼拼单：同一栋楼的同学凑人数 -->
+        <el-collapse class="detail-extra">
+          <el-collapse-item name="group">
+            <template #title>
+              <span class="extra-title">🏠 宿舍楼拼单</span>
+              <span v-if="groupBuys.length" class="extra-badge">{{ groupBuys.length }} 个进行中</span>
+            </template>
+            <el-empty v-if="groupBuys.length === 0" description="这件宝贝还没有人发起拼单" :image-size="50" />
+            <div v-for="gb in groupBuys" :key="gb.id" class="gb-item">
+              <div class="gb-head">
+                <span class="gb-building">🏢 {{ gb.building }}</span>
+                <el-tag size="small" :type="gb.status === '拼单中' ? 'warning' : 'success'">{{ gb.status }}</el-tag>
+              </div>
+              <div class="gb-meta">
+                发起人 {{ gb.initiatorName }} · 已参与 <b>{{ gb.joinedCount }}</b>/{{ gb.targetCount }} 人
+              </div>
+              <div class="gb-members">成员：{{ gb.members.map(m => m.name).join('、') }}</div>
+              <el-button v-if="gb.status === '拼单中'" size="small" type="primary" plain
+                @click="openJoin(gb)">我也要拼</el-button>
+            </div>
+            <el-button size="small" class="gb-create" @click="openGroupBuy">＋ 发起拼单</el-button>
+          </el-collapse-item>
+        </el-collapse>
       </div>
     </div>
     <template #footer>
       <el-button round @click="detailVisible = false">关闭</el-button>
+      <el-button round @click="openBarter">🔄 换一换</el-button>
       <el-button round @click="contactSeller(detailGoods)">联系卖家</el-button>
       <el-button type="primary" round @click="buyFromDetail">我想要</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- C3 发起拼单 -->
+  <el-dialog v-model="groupBuyVisible" title="发起宿舍楼拼单" width="420px">
+    <div class="gb-form">
+      <div class="gb-form-row">
+        <span class="gb-label">我的楼栋</span>
+        <el-select v-model="groupBuyForm.building" placeholder="选择你所在的宿舍楼" style="flex: 1">
+          <el-option v-for="b in buildings" :key="b" :label="b" :value="b" />
+        </el-select>
+      </div>
+      <div class="gb-form-row">
+        <span class="gb-label">成团人数</span>
+        <el-input-number v-model="groupBuyForm.targetCount" :min="2" :max="20" />
+      </div>
+      <p class="gb-note">拼单只对本栋楼的同学开放，人满自动成团。</p>
+    </div>
+    <template #footer>
+      <el-button @click="groupBuyVisible = false">取消</el-button>
+      <el-button type="primary" :loading="groupBuySubmitting" @click="submitGroupBuy">发起拼单</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- C3 参与拼单 -->
+  <el-dialog v-model="joinVisible" title="参与拼单" width="400px">
+    <div class="gb-form">
+      <div class="gb-form-row">
+        <span class="gb-label">我的楼栋</span>
+        <el-select v-model="joinForm.building" placeholder="选择你所在的宿舍楼" style="flex: 1">
+          <el-option v-for="b in buildings" :key="b" :label="b" :value="b" />
+        </el-select>
+      </div>
+      <p class="gb-note">
+        这个拼单限定「{{ activeGroupBuy?.building }}」，只能同栋楼的同学加入。
+      </p>
+    </div>
+    <template #footer>
+      <el-button @click="joinVisible = false">取消</el-button>
+      <el-button type="primary" :loading="joining" @click="submitJoin">确认加入</el-button>
+    </template>
+  </el-dialog>
+
+  <!-- C4 发起换物 -->
+  <el-dialog v-model="barterVisible" title="以物换物" width="440px">
+    <div class="gb-form">
+      <div class="gb-form-row">
+        <span class="gb-label">我拿什么换</span>
+        <el-input v-model="barterForm.offerTitle" maxlength="40" show-word-limit
+          placeholder="例如：九成新的 Kindle Paperwhite" style="flex: 1" />
+      </div>
+      <el-input v-model="barterForm.offerDesc" type="textarea" :rows="3" maxlength="300" show-word-limit
+        placeholder="补充说明（选填）：成色、配件、为什么想换…" />
+      <p class="gb-note">换物不涉及付款，对方同意后你们自行约时间交接。</p>
+    </div>
+    <template #footer>
+      <el-button @click="barterVisible = false">取消</el-button>
+      <el-button type="primary" :loading="barterSubmitting" @click="submitBarter">发出换物请求</el-button>
     </template>
   </el-dialog>
 
@@ -349,7 +593,36 @@ onMounted(loadGoods)
   color: #8a6100;
 }
 .sm-tag.semantic { background: #e8f3ff; color: #1a5fb4; }
+.sm-tag.course { background: #eaf7ea; color: #2e7d32; }
 .sm-count { font-size: 12px; color: #999; }
+.course-input { max-width: 180px; }
+.gc-tag-course { background: #eaf7ea; color: #2e7d32; }
+
+/* C3/C4 详情弹窗里的附加区 */
+.detail-extra { margin-top: 12px; }
+.extra-title { font-size: 14px; font-weight: 600; color: var(--ink-color); }
+.extra-badge {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #8a6100;
+  background: #fff3c2;
+  border-radius: 8px;
+  padding: 1px 8px;
+}
+.gb-item {
+  border: 1px solid #f0f0f0;
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.gb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.gb-building { font-weight: 600; font-size: 13px; color: var(--ink-color); }
+.gb-meta { font-size: 12px; color: #888; margin: 5px 0 3px; }
+.gb-members { font-size: 12px; color: #aaa; margin-bottom: 8px; }
+.gb-create { margin-top: 4px; }
+.gb-form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.gb-label { width: 72px; font-size: 13px; color: #888; flex-shrink: 0; }
+.gb-note { font-size: 12px; color: #bbb; line-height: 1.6; margin: 4px 0 0; }
 .seller-tag { margin-left: 6px; }
 .hero-search :deep(.el-input__wrapper) { border-radius: 20px; }
 

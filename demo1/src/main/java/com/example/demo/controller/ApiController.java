@@ -24,6 +24,7 @@ import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
 import com.alibaba.fastjson2.JSON;
+import com.alibaba.fastjson2.JSONObject;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.GoodsImage;
 import com.example.demo.entity.User;
@@ -57,16 +58,22 @@ public class ApiController {
     @Autowired
     private com.example.demo.service.CreditService creditService;
 
-    // 获取商品列表：支持分类、关键词筛选，已售商品不下架但不在列表中展示
+    // 获取商品列表：支持分类、关键词、课程号筛选，已售商品不下架但不在列表中展示
     @GetMapping("/goods")
     public List<Goods> getGoods(@RequestParam(required = false) String category,
-                                @RequestParam(required = false) String keyword) {
+                                @RequestParam(required = false) String keyword,
+                                @RequestParam(required = false) String courseCode) {
         return goodsRepository.findAll().stream()
                 .filter(g -> !"已售".equals(g.getStatus()))
                 .filter(g -> category == null || category.isBlank() || category.equals(g.getCategory()))
+                // C2：按课程号 / 课程名找教材
+                .filter(g -> courseCode == null || courseCode.isBlank()
+                        || (g.getCourseCode() != null && g.getCourseCode().contains(courseCode.trim())))
                 .filter(g -> {
                     if (keyword == null || keyword.isBlank()) return true;
-                    String text = g.getTitle() + g.getCategory() + g.getDescription();
+                    // 关键词同时匹配课程号，这样搜「MA101」也能找到教材
+                    String text = g.getTitle() + g.getCategory() + g.getDescription()
+                            + (g.getCourseCode() == null ? "" : g.getCourseCode());
                     return text.contains(keyword.trim());
                 })
                 .toList();
@@ -106,15 +113,29 @@ public class ApiController {
             @RequestParam BigDecimal price,
             @RequestParam String description,
             @RequestParam Long userId,
+            @RequestParam(value = "courseCode", required = false) String courseCode,
             @RequestParam(value = "images", required = false) MultipartFile[] images
     ) {
         try {
+            // A6 内容风控：违禁内容直接拒绝发布。前端发布前也会查一次，
+            // 这里是后端兜底——绕过前端也拦得住。
+            JSONObject check = aiClient.moderate(title, description);
+            if (check != null && "block".equals(check.getString("level"))) {
+                Map<String, Object> rejected = new LinkedHashMap<>();
+                rejected.put("success", false);
+                rejected.put("message", check.getString("message"));
+                rejected.put("level", "block");
+                return ResponseEntity.badRequest().body(rejected);
+            }
+
             Goods goods = new Goods();
             goods.setTitle(title);
             goods.setCategory(category);
             goods.setPrice(price);
             goods.setDescription(description);
             goods.setUserId(userId);
+            // C2：教材类商品可关联课程号
+            goods.setCourseCode(courseCode == null || courseCode.isBlank() ? null : courseCode.trim());
             goods = goodsRepository.save(goods);
 
             if (images != null) {

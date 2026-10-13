@@ -159,6 +159,32 @@ public class AiClient {
         }
     }
 
+    /** 内容风控（A6）；失败返回 null，由调用方决定是否放行。 */
+    public JSONObject moderate(String title, String description) {
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("title", title == null ? "" : title);
+            body.put("description", description == null ? "" : description);
+            return post("/ai/moderate", body);
+        } catch (Exception e) {
+            logger.warn("内容风控调用失败，按放行处理：{}", e.getMessage());
+            return null;
+        }
+    }
+
+    /** 图片识别自动发布（A3）；失败返回 null。 */
+    public JSONObject vision(String imageBase64, String mime) {
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("image", imageBase64);
+            body.put("mime", mime == null || mime.isBlank() ? "image/jpeg" : mime);
+            return post("/ai/vision", body);
+        } catch (Exception e) {
+            logger.warn("图片识别调用失败：{}", e.getMessage());
+            return null;
+        }
+    }
+
     private JSONObject post(String path, Object body) throws Exception {
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);

@@ -16,6 +16,11 @@ class Settings:
         self.llm_model = os.getenv("LLM_MODEL", "")
         self.llm_timeout = int(os.getenv("LLM_TIMEOUT", "20"))
 
+        # A3 图片识别：多模态模型（OpenAI 兼容协议，智谱 glm-4v 之类同样适用）
+        self.vision_base_url = os.getenv("VISION_BASE_URL", "").rstrip("/")
+        self.vision_api_key = os.getenv("VISION_API_KEY", "")
+        self.vision_model = os.getenv("VISION_MODEL", "")
+
         self.sim_threshold = float(os.getenv("SIM_THRESHOLD", "0.35"))
         # 词袋模式缺少 IDF 加权，余弦值整体偏低，必须单独校准（见 default_threshold）
         self.sim_threshold_tfidf = float(os.getenv("SIM_THRESHOLD_TFIDF", "0.20"))
@@ -27,6 +32,11 @@ class Settings:
     def llm_enabled(self) -> bool:
         """三项都配齐才认为云端生成可用，否则走抽取式降级。"""
         return bool(self.llm_base_url and self.llm_api_key and self.llm_model)
+
+    @property
+    def vision_enabled(self) -> bool:
+        """三项都配齐才认为图片识别可用（A3 依赖多模态模型）。"""
+        return bool(self.vision_base_url and self.vision_api_key and self.vision_model)
 
     def default_threshold(self, mode: str) -> float:
         """按实际生效的向量模式取默认召回阈值。

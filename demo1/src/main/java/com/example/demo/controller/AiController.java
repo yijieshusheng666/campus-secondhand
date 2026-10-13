@@ -1,7 +1,9 @@
 package com.example.demo.controller;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -31,6 +33,12 @@ import com.example.demo.service.AiClient;
 public class AiController {
 
     private static final int OVER_FETCH_FACTOR = 3;
+    /** A4 定价建议：取多少件同类商品做价格样本 */
+    private static final int PRICE_SAMPLE_SIZE = 12;
+    /** 样本少于这个数就不给建议价，避免一条数据瞎猜 */
+    private static final int MIN_PRICE_SAMPLES = 2;
+    /** 定价样本的相对分下限：低于「最高分 × 该系数」的同类样本不参与统计 */
+    private static final double PRICE_RELATIVE_FLOOR = 0.35;
 
     @Autowired
     private AiClient aiClient;
@@ -102,12 +110,13 @@ public class AiController {
                 "message", ok ? "索引重建完成" : "AI 服务不可用，索引未重建"));
     }
 
-    /** 商品索引文本：标题 + 分类 + 描述，供 Python 侧向量化。 */
+    /** 商品索引文本：标题 + 分类 + 描述 + 课程号，供 Python 侧向量化。 */
     public static String buildIndexText(Goods goods) {
         String title = goods.getTitle() == null ? "" : goods.getTitle();
         String category = goods.getCategory() == null ? "" : goods.getCategory();
         String description = goods.getDescription() == null ? "" : goods.getDescription();
-        return (title + " " + category + " " + description).trim();
+        String courseCode = goods.getCourseCode() == null ? "" : goods.getCourseCode();
+        return (title + " " + category + " " + description + " " + courseCode).trim();
     }
 
     /**
@@ -196,6 +205,166 @@ public class AiController {
         return ResponseEntity.ok(wrap(resp));
     }
 
+    /**
+     * A6 内容风控：检查标题与描述。规则层永远可用，配了 LLM 会叠加模型判断。
+     * 发布商品接口也会独立调用一次，前端绕过也拦得住。
+     */
+    @PostMapping("/moderate")
+    public ResponseEntity<?> moderate(@RequestBody(required = false) Map<String, Object> body) {
+        JSONObject resp = aiClient.moderate(text(body, "title"), text(body, "description"));
+        return ResponseEntity.ok(wrap(resp));
+    }
+
+    /**
+     * A3 图片识别自动发布：把图片交给多模态模型，返回预填的标题/分类/成色/描述。
+     * 未配置多模态模型时返回 available=false，前端提示手动填写。
+     */
+    @PostMapping("/vision")
+    public ResponseEntity<?> vision(@RequestBody(required = false) Map<String, Object> body) {
+        JSONObject resp = aiClient.vision(text(body, "image"), text(body, "mime"));
+        return ResponseEntity.ok(wrap(resp));
+    }
+
+    /**
+     * A4 智能定价建议：用语义检索找到同类商品，按价格分布给建议价。
+     * 只在 Java 侧编排，不新增 AI 接口 —— 价格以 MySQL 为唯一数据源。
+     */
+    @GetMapping("/price-suggest")
+    public ResponseEntity<?> priceSuggest(@RequestParam String title,
+                                          @RequestParam(required = false) String category,
+                                          @RequestParam(required = false) String description) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+
+        if (title == null || title.isBlank()) {
+            result.put("available", false);
+            result.put("message", "先填商品标题，我再帮你估个价");
+            return ResponseEntity.ok(result);
+        }
+
+        // 注意：**不要把分类拼进检索词**。分类名出现在同类目每件商品的文案里，
+        // 拼进去会让整个类目互相"相似"（实测「索尼降噪耳机 电子产品」把 iPhone、
+        // MacBook 都拉进样本来，建议价被抬到 ¥6499）。分类只用于兜底补齐。
+        String sampleQuery = title.trim();
+
+        List<Map<String, Object>> hits = aiClient.search(sampleQuery, PRICE_SAMPLE_SIZE * 2, 0.0);
+        double best = 0;
+        for (Map<String, Object> hit : hits) {
+            if (hit.get("score") instanceof Number number) {
+                best = Math.max(best, number.doubleValue());
+            }
+        }
+        double floor = best * PRICE_RELATIVE_FLOOR;
+
+        // 候选 = 语义召回（只覆盖在售）+ Java 侧关键词扫描（覆盖全部商品）。
+        // 必须补后一步：定价要参考"已售/历史"的价格，而 AI 索引里只有在售商品。
+        // 实测「索尼降噪耳机」只召回 1 件（AirPods 已售、不在索引里），补扫后才有 2 件同类样本。
+        Map<Long, Double> candidateScores = new LinkedHashMap<>();
+        for (Map<String, Object> hit : hits) {
+            Object score = hit.get("score");
+            double value = score instanceof Number number ? number.doubleValue() : 0;
+            if (value >= floor && value > 0 && hit.get("goodsId") instanceof Number id) {
+                candidateScores.put(id.longValue(), value);
+            }
+        }
+        List<String> grams = grams(sampleQuery);
+        for (Goods goods : goodsRepository.findAll()) {
+            if (goods.getPrice() == null || grams.isEmpty()) {
+                continue;
+            }
+            String text = (goods.getTitle() == null ? "" : goods.getTitle())
+                    + (goods.getCategory() == null ? "" : goods.getCategory())
+                    + (goods.getDescription() == null ? "" : goods.getDescription());
+            int hitCount = 0;
+            for (String gram : grams) {
+                if (text.contains(gram)) {
+                    hitCount++;
+                }
+            }
+            if (hitCount > 0) {
+                double keywordScore = hitCount / (double) grams.size();
+                candidateScores.merge(goods.getId(), keywordScore, Math::max);
+            }
+        }
+
+        List<Long> ranked = new ArrayList<>(candidateScores.keySet());
+        ranked.sort((a, b) -> Double.compare(candidateScores.get(b), candidateScores.get(a)));
+
+        Map<Long, Goods> samples = new LinkedHashMap<>();
+        for (Long id : ranked) {
+            if (samples.size() >= PRICE_SAMPLE_SIZE) {
+                break;
+            }
+            goodsRepository.findById(id)
+                    .filter(g -> g.getPrice() != null)
+                    .ifPresent(g -> samples.put(g.getId(), g));
+        }
+
+        // 相似样本不够时退回同类目补齐，但要如实告诉用户这是"粗估"
+        int exactCount = samples.size();
+        boolean coarse = exactCount < MIN_PRICE_SAMPLES;
+        if (coarse && category != null && !category.isBlank()) {
+            for (Goods goods : goodsRepository.findAll()) {
+                if (samples.size() >= PRICE_SAMPLE_SIZE) {
+                    break;
+                }
+                if (category.equals(goods.getCategory()) && goods.getPrice() != null) {
+                    samples.putIfAbsent(goods.getId(), goods);
+                }
+            }
+        }
+
+        if (samples.size() < MIN_PRICE_SAMPLES) {
+            result.put("available", false);
+            result.put("message", "同类商品太少（只有 " + samples.size() + " 件），暂时估不出参考价");
+            return ResponseEntity.ok(result);
+        }
+
+        List<BigDecimal> prices = new ArrayList<>();
+        for (Goods goods : samples.values()) {
+            prices.add(goods.getPrice());
+        }
+        prices.sort(Comparator.naturalOrder());
+
+        // 中位数：偶数个样本取中间两个的平均，避免"取偏大那个"把建议价抬高
+        BigDecimal median;
+        int size = prices.size();
+        if (size % 2 == 1) {
+            median = prices.get(size / 2);
+        } else {
+            median = prices.get(size / 2 - 1).add(prices.get(size / 2))
+                    .divide(BigDecimal.valueOf(2), 0, RoundingMode.HALF_UP);
+        }
+        BigDecimal low = prices.get((int) Math.floor((size - 1) * 0.25));
+        BigDecimal high = prices.get((int) Math.ceil((size - 1) * 0.75));
+
+        List<Map<String, Object>> sampleViews = new ArrayList<>();
+        for (Goods goods : samples.values()) {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", goods.getId());
+            item.put("title", goods.getTitle());
+            item.put("price", goods.getPrice());
+            item.put("category", goods.getCategory());
+            item.put("status", goods.getStatus());
+            sampleViews.add(item);
+        }
+
+        result.put("available", true);
+        result.put("suggested", median);
+        result.put("low", low);
+        result.put("high", high);
+        result.put("sampleCount", samples.size());
+        result.put("exactCount", exactCount);
+        result.put("coarse", coarse);
+        result.put("samples", sampleViews);
+        String basis = coarse
+                ? "同分类 " + samples.size() + " 件商品（只找到 " + exactCount + " 件高度相似，属于粗估）"
+                : "同类 " + samples.size() + " 件商品";
+        result.put("message", "参考" + basis + "，建议定价 ¥"
+                + median.stripTrailingZeros().toPlainString());
+        return ResponseEntity.ok(result);
+    }
+
     /** 统一包装 AI 服务响应；服务不可用时给出 available=false，前端据此提示。 */
     private Map<String, Object> wrap(JSONObject resp) {
         Map<String, Object> result = new LinkedHashMap<>();
@@ -207,6 +376,19 @@ public class AiController {
         result.put("available", true);
         result.putAll(resp);
         return result;
+    }
+
+    /** 定价用的关键词切分：2 字滑窗，与项目原有的中文匹配思路一致。 */
+    private static List<String> grams(String text) {
+        List<String> grams = new ArrayList<>();
+        if (text == null) {
+            return grams;
+        }
+        String cleaned = text.replaceAll("[\\s,，。！!？?、；;：:\"'（）()【】\\[\\]]", "");
+        for (int i = 0; i + 2 <= cleaned.length() && grams.size() < 20; i++) {
+            grams.add(cleaned.substring(i, i + 2));
+        }
+        return grams;
     }
 
     private static String text(Map<String, Object> body, String key) {
