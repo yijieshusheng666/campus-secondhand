@@ -18,6 +18,11 @@ public class User {
     @JsonIgnore
     private String password;
 
+    // B1 学号实名：真实姓名 + 认证状态（老数据为 null，按未认证处理）
+    private String realName;
+    private Boolean verified;
+    private LocalDateTime verifiedAt;
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -55,6 +60,30 @@ public class User {
 
     public void setPassword(String password) {
         this.password = password;
+    }
+
+    public String getRealName() {
+        return realName;
+    }
+
+    public void setRealName(String realName) {
+        this.realName = realName;
+    }
+
+    public Boolean getVerified() {
+        return verified;
+    }
+
+    public void setVerified(Boolean verified) {
+        this.verified = verified;
+    }
+
+    public LocalDateTime getVerifiedAt() {
+        return verifiedAt;
+    }
+
+    public void setVerifiedAt(LocalDateTime verifiedAt) {
+        this.verifiedAt = verifiedAt;
     }
 
     public LocalDateTime getCreatedAt() {

@@ -24,6 +24,57 @@ const addresses = ref([])
 const selectedAddrId = ref(null)
 const addrForm = ref({ receiver: '', phone: '', address: '' })
 
+// B1 学号实名认证
+const verified = ref(false)
+const realNameMasked = ref('')
+const verifyVisible = ref(false)
+const verifyForm = ref({ realName: '' })
+const verifying = ref(false)
+
+async function loadVerifyStatus() {
+  if (!user.value) return
+  try {
+    const { data } = await request.get(`/users/${user.value.id}`)
+    verified.value = !!data.verified
+    realNameMasked.value = data.realNameMasked || ''
+  } catch (e) {
+    // 拿不到认证状态不影响页面其他部分
+  }
+}
+
+function openVerifyDialog() {
+  if (verified.value) {
+    ElMessage.success(`该账号已实名认证：${realNameMasked.value}`)
+    return
+  }
+  verifyForm.value.realName = ''
+  verifyVisible.value = true
+}
+
+async function submitVerify() {
+  const realName = verifyForm.value.realName.trim()
+  if (!realName) {
+    ElMessage.warning('请填写真实姓名')
+    return
+  }
+  verifying.value = true
+  try {
+    const { data } = await request.post('/user/verify', { id: user.value.id, realName })
+    if (data.success) {
+      verified.value = true
+      realNameMasked.value = data.realNameMasked || ''
+      verifyVisible.value = false
+      ElMessage.success(data.message || '实名认证通过')
+    } else {
+      ElMessage.error(data.message || '认证失败')
+    }
+  } catch (e) {
+    ElMessage.error(e.response?.data?.message || '认证失败，请检查后端服务')
+  } finally {
+    verifying.value = false
+  }
+}
+
 const statusTag = {
   '待发货': 'warning',
   '已发货': 'primary',
@@ -210,6 +261,7 @@ async function deleteAddr(idx) {
 onMounted(() => {
   loadMyGoods()
   loadSales()
+  loadVerifyStatus()
 })
 </script>
 
@@ -226,10 +278,18 @@ onMounted(() => {
       <el-card class="user-card" shadow="never">
         <div class="user-info" @click="toLogin">
           <el-avatar :size="72" class="user-avatar">{{ user.username?.charAt(0) }}</el-avatar>
-          <h3>{{ user.username }}</h3>
+          <h3>
+            {{ user.username }}
+            <el-tag v-if="verified" size="small" type="success" class="verify-tag">✅ 已实名</el-tag>
+            <el-tag v-else size="small" type="warning" class="verify-tag">未实名</el-tag>
+          </h3>
           <p class="stuid">学号：{{ user.stuid }}</p>
+          <p v-if="verified" class="stuid">实名：{{ realNameMasked }}（已通过学号认证）</p>
         </div>
         <div class="menu-row">
+          <el-button type="primary" plain @click="openVerifyDialog">
+            {{ verified ? '查看实名认证' : '实名认证' }}
+          </el-button>
           <el-button @click="openNameDialog">修改昵称</el-button>
           <el-button @click="openAddrDialog">收货地址管理</el-button>
           <el-button type="danger" plain @click="onLogout">退出登录</el-button>
@@ -307,12 +367,39 @@ onMounted(() => {
       <el-button type="primary" @click="saveAddress">保存地址</el-button>
     </template>
   </el-dialog>
+
+  <!-- B1 学号实名认证 -->
+  <el-dialog v-model="verifyVisible" title="学号实名认证" width="420px">
+    <div class="verify-body">
+      <p class="verify-tip">实名后商品会显示「已实名」标识，交易更放心。</p>
+      <div class="verify-row">
+        <span class="verify-label">学号</span>
+        <span class="verify-value">{{ user.stuid }}</span>
+      </div>
+      <div class="verify-row">
+        <span class="verify-label">真实姓名</span>
+        <el-input v-model="verifyForm.realName" placeholder="请输入 2-10 位中文真实姓名" />
+      </div>
+      <p class="verify-note">说明：本项目只做学号格式与唯一性校验，真正的实名核验需对接学校教务系统。</p>
+    </div>
+    <template #footer>
+      <el-button @click="verifyVisible = false">取消</el-button>
+      <el-button type="primary" :loading="verifying" @click="submitVerify">提交认证</el-button>
+    </template>
+  </el-dialog>
 </template>
 
 <style scoped>
 .user-page { max-width: 800px; margin: 0 auto; }
 .empty-wrap { background: #fff; border-radius: 8px; padding: 40px; }
 .user-card { margin-bottom: 16px; }
+.verify-tag { margin-left: 8px; vertical-align: middle; }
+.verify-body { font-size: 13px; }
+.verify-tip { color: #666; margin: 0 0 12px; }
+.verify-row { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.verify-label { width: 64px; color: #888; flex-shrink: 0; }
+.verify-value { color: var(--ink-color); font-weight: 600; }
+.verify-note { color: #bbb; font-size: 12px; line-height: 1.6; margin: 4px 0 0; }
 .user-info { text-align: center; cursor: default; }
 .user-avatar { background: #ffd21e; color: #23201a; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
 .stuid { color: #999; font-size: 13px; margin-top: 4px; }

@@ -2,8 +2,10 @@ package com.example.demo.controller;
 
 import java.io.File;
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -211,10 +213,85 @@ public class ApiController {
         if (user == null) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.ok(Map.of(
-                "id", user.getId(),
-                "username", user.getUsername(),
-                "stuid", user.getStuid() == null ? "" : user.getStuid()));
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("id", user.getId());
+        result.put("username", user.getUsername());
+        result.put("stuid", user.getStuid() == null ? "" : user.getStuid());
+        // B1：只对外暴露"是否已实名"和脱敏姓名，不返回完整真实姓名
+        result.put("verified", Boolean.TRUE.equals(user.getVerified()));
+        result.put("realNameMasked", maskName(user.getRealName()));
+        return ResponseEntity.ok(result);
+    }
+
+    /**
+     * B1 学号实名认证。
+     * 校验学号格式 + 中文姓名 + 学号唯一，通过后写入真实姓名并标记已认证。
+     * 说明：这里只做格式与唯一性校验，真正的实名核验需要对接学校教务系统。
+     */
+    @PostMapping("/user/verify")
+    @Transactional
+    public ResponseEntity<?> verifyUser(@RequestBody Map<String, Object> body) {
+        if (body.get("id") == null) {
+            return ResponseEntity.badRequest().body(verifyFail("缺少用户标识"));
+        }
+        Long id = Long.valueOf(body.get("id").toString());
+        User user = userRepository.findById(id).orElse(null);
+        if (user == null) {
+            return ResponseEntity.badRequest().body(verifyFail("用户不存在"));
+        }
+        if (Boolean.TRUE.equals(user.getVerified())) {
+            return ResponseEntity.ok(verifyOk(user, "该账号已完成实名认证"));
+        }
+
+        String stuid = user.getStuid() == null ? "" : user.getStuid().trim();
+        if (!stuid.matches("^[A-Za-z0-9]{4,20}$")) {
+            return ResponseEntity.badRequest().body(verifyFail("学号格式不正确（4-20 位字母或数字）"));
+        }
+
+        String realName = body.get("realName") == null ? "" : body.get("realName").toString().trim();
+        if (!realName.matches("^[\\u4e00-\\u9fa5·]{2,10}$")) {
+            return ResponseEntity.badRequest().body(verifyFail("请填写 2-10 位中文真实姓名"));
+        }
+
+        // 学号唯一：不能拿别人的学号来认证
+        User holder = userRepository.findByStuid(stuid);
+        if (holder != null && !holder.getId().equals(user.getId())
+                && Boolean.TRUE.equals(holder.getVerified())) {
+            return ResponseEntity.badRequest().body(verifyFail("该学号已被其他账号认证"));
+        }
+
+        user.setRealName(realName);
+        user.setVerified(true);
+        user.setVerifiedAt(LocalDateTime.now());
+        userRepository.save(user);
+        return ResponseEntity.ok(verifyOk(user, "实名认证通过"));
+    }
+
+    private Map<String, Object> verifyOk(User user, String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+        result.put("message", message);
+        result.put("verified", true);
+        result.put("realNameMasked", maskName(user.getRealName()));
+        return result;
+    }
+
+    private Map<String, Object> verifyFail(String message) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", false);
+        result.put("message", message);
+        return result;
+    }
+
+    /** 姓名脱敏：张三 -> 张*，欧阳娜娜 -> 欧***，只保留姓氏。 */
+    private String maskName(String name) {
+        if (name == null || name.isBlank()) {
+            return "";
+        }
+        if (name.length() == 1) {
+            return name;
+        }
+        return name.charAt(0) + "*".repeat(name.length() - 1);
     }
 
     // 根据需求关键词匹配推荐商品
