@@ -72,6 +72,16 @@ def test_chat_with_empty_question_still_answers(client):
     assert resp.json()["answer"]
 
 
+def test_chat_without_context_skips_llm(client):
+    """检索为空时不调模型：返回模板兜底，避免凭空生成。"""
+    resp = client.post("/ai/chat", json={"question": "量子纠缠退相干是怎么回事", "top_k": 3})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["sources"] == []
+    assert body["mode"] == "extractive"
+    assert body["answer"]
+
+
 def test_health_reports_real_modes(client):
     body = client.get("/health").json()
     assert body["embedding"]["mode"] in ("vector", "tfidf")

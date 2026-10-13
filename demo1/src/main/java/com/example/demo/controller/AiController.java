@@ -2,6 +2,7 @@ package com.example.demo.controller;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -9,10 +10,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.alibaba.fastjson2.JSONArray;
+import com.alibaba.fastjson2.JSONObject;
 import com.example.demo.entity.Goods;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.service.AiClient;
@@ -103,5 +107,61 @@ public class AiController {
         String category = goods.getCategory() == null ? "" : goods.getCategory();
         String description = goods.getDescription() == null ? "" : goods.getDescription();
         return (title + " " + category + " " + description).trim();
+    }
+
+    /**
+     * RAG 客服问答：检索平台知识库 + 在售商品，再交给 AI 服务生成回答并附引用来源。
+     * AI 服务不可用时返回 available=false，由前端回退到关键词客服。
+     */
+    @PostMapping("/chat")
+    public ResponseEntity<?> chat(@RequestBody(required = false) Map<String, Object> body) {
+        Object rawQuestion = body == null ? null : body.get("question");
+        String question = rawQuestion == null ? "" : rawQuestion.toString().trim();
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("success", true);
+
+        if (question.isEmpty()) {
+            result.put("available", true);
+            result.put("mode", "none");
+            result.put("answer", "请告诉我你想问什么，比如「怎么退款」「有没有便宜的台灯」。");
+            result.put("sources", new ArrayList<>());
+            return ResponseEntity.ok(result);
+        }
+
+        JSONObject resp = aiClient.chat(question, extractHistory(body));
+        if (resp == null) {
+            result.put("available", false);
+            result.put("mode", "unavailable");
+            result.put("answer", "");
+            result.put("sources", new ArrayList<>());
+            return ResponseEntity.ok(result);
+        }
+
+        JSONArray sources = resp.getJSONArray("sources");
+        String answer = resp.getString("answer");
+
+        result.put("available", true);
+        result.put("mode", resp.getString("mode") == null ? "unknown" : resp.getString("mode"));
+        result.put("answer", answer == null ? "" : answer);
+        result.put("sources", sources == null ? new JSONArray() : sources);
+        return ResponseEntity.ok(result);
+    }
+
+    /** 把前端传来的多轮对话转成 AI 服务认识的 {role, content} 列表。 */
+    private List<Map<String, String>> extractHistory(Map<String, Object> body) {
+        List<Map<String, String>> history = new ArrayList<>();
+        if (body == null || !(body.get("history") instanceof List<?> raw)) {
+            return history;
+        }
+        for (Object item : raw) {
+            if (item instanceof Map<?, ?> entry && entry.get("content") != null) {
+                Map<String, String> turn = new HashMap<>();
+                turn.put("role", entry.get("role") == null ? "user" : entry.get("role").toString());
+                turn.put("content", entry.get("content").toString());
+                history.add(turn);
+            }
+        }
+        return history;
     }
 }

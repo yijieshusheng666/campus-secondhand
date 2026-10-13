@@ -30,6 +30,9 @@ public class AiClient {
 
     private static final Logger logger = LoggerFactory.getLogger(AiClient.class);
 
+    /** 客服问答注入的上下文条数：太多会把无关片段塞进 Prompt。 */
+    private static final int CHAT_TOP_K = 4;
+
     private final RestTemplate restTemplate;
     private final String baseUrl;
 
@@ -94,6 +97,20 @@ public class AiClient {
         } catch (Exception e) {
             logger.warn("索引重建失败：{}", e.getMessage());
             return false;
+        }
+    }
+
+    /** RAG 问答：返回 AI 服务原始响应（answer / mode / sources）；失败返回 null。 */
+    public JSONObject chat(String question, List<Map<String, String>> history) {
+        try {
+            Map<String, Object> body = new HashMap<>();
+            body.put("question", question);
+            body.put("history", history);
+            body.put("top_k", CHAT_TOP_K);
+            return post("/ai/chat", body);
+        } catch (Exception e) {
+            logger.warn("RAG 问答调用失败，前端将回退关键词客服：{}", e.getMessage());
+            return null;
         }
     }
 

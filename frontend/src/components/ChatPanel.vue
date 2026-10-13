@@ -4,13 +4,14 @@ import request from '../api'
 
 const emit = defineEmits(['go-home', 'close'])
 
-const messages = ref([])   // { type: 'ai'|'user', text, goods: [...] }
+const messages = ref([])   // { type: 'ai'|'user', text, goods: [...], sources: [...], mode }
 const input = ref('')
 const typing = ref(false)
 
 // 快捷提问（自定义元素：常见问题一键发送）
-const quickAsks = ['怎么下单', '能退款吗', '怎么发布闲置']
+const quickAsks = ['怎么退款', '怎么发布闲置', '怎么联系卖家']
 
+// 三层兜底里的最后一层：AI 服务与关键词推荐都不可用时的本地规则
 const fallbackRules = [
   { keys: ['你好', '您好', 'hi', 'hello', '嗨'], reply: '你好呀！我是校园小助手，想买点什么？可以告诉我商品名称或类别，比如"买台灯"、"想要一本书"。' },
   { keys: ['怎么买', '如何购买', '购买流程', '下单'], reply: '购买流程很简单：在首页找到心仪的宝贝，点击"我想要"，选择或填写收货地址后确认付款即可。付款后订单会出现在"我的订单"里，等待卖家发货。' },
@@ -32,8 +33,8 @@ function scrollToBottom() {
   })
 }
 
-function addMessage(type, text, goods = []) {
-  messages.value.push({ type, text, goods })
+function addMessage(type, text, goods = [], sources = [], mode = '') {
+  messages.value.push({ type, text, goods, sources, mode })
   saveHistory()
   scrollToBottom()
 }
@@ -47,6 +48,53 @@ async function loadAllGoods() {
   }
 }
 
+// 把最近的几轮对话交给后端，供后续做多轮记忆（当前 P1 阶段后端尚未消费）
+function buildHistory() {
+  return messages.value
+    .filter(m => m.text)
+    .slice(-6)
+    .map(m => ({ role: m.type === 'ai' ? 'assistant' : 'user', content: m.text }))
+}
+
+// 依据里的商品来源只有 goodsId，需要回商品库取完整信息才能渲染卡片
+async function loadSourceGoods(sources) {
+  const goodsSources = sources.filter(s => s.type === 'goods' && s.goodsId)
+  if (!goodsSources.length) return []
+  const allGoods = await loadAllGoods()
+  return goodsSources
+    .map(s => allGoods.find(g => g.id === s.goodsId))
+    .filter(Boolean)
+}
+
+// 依据来源里的知识库条目（商品来源会单独渲染成卡片，不在这里重复展示）
+function faqSources(sources) {
+  return (sources || []).filter(s => s.type === 'faq')
+}
+
+async function askRag(text) {
+  const { data } = await request.post('/ai/chat', { question: text, history: buildHistory() })
+  if (!data.success || !data.available || !data.answer) return null
+  return data
+}
+
+// 第二层：关键词推荐（AI 服务不可用时的回退，保留原有能力）
+async function askRecommend(text) {
+  const { data } = await request.post('/recommend', { keyword: text })
+  if (!data.success || !data.data || data.data.length === 0) return null
+  const allGoods = await loadAllGoods()
+  const goods = data.data.map(item => allGoods.find(g => g.id === item.id)).filter(Boolean)
+  return goods.length ? goods : null
+}
+
+// 第三层：本地规则
+function askLocalRule(text) {
+  const lower = text.toLowerCase()
+  const rule = fallbackRules.find(r => r.keys.some(k => lower.includes(k)))
+  return rule
+    ? rule.reply
+    : '暂时没有找到相关资料，可以换个说法试试，比如"怎么退款"、"耳机"、"台灯"。'
+}
+
 async function sendMessage() {
   const text = input.value.trim()
   if (!text) return
@@ -56,32 +104,45 @@ async function sendMessage() {
   typing.value = true
   scrollToBottom()
 
-  // 优先调用后端推荐接口
   let reply = null
-  let recommendGoods = []
+  let goods = []
+  let sources = []
+  let mode = ''
+
+  // 1) RAG 问答：检索平台知识库 + 在售商品，回答附引用来源
+  //    只在拿到「依据」时才采纳该回答——没有依据的回答等于没答，交给下层去关键词找货
   try {
-    const { data } = await request.post('/recommend', { keyword: text })
-    if (data.success && data.data && data.data.length > 0) {
-      const allGoods = await loadAllGoods()
-      recommendGoods = data.data
-        .map(item => allGoods.find(g => g.id === item.id))
-        .filter(Boolean)
-      reply = '为你找到了以下宝贝，点击查看详情～'
+    const rag = await askRag(text)
+    if (rag && rag.sources && rag.sources.length) {
+      reply = rag.answer
+      mode = rag.mode
+      sources = rag.sources
+      goods = await loadSourceGoods(sources)
     }
   } catch (e) {
-    // 推荐接口失败时走本地规则
+    // AI 服务不可用，走下一层兜底
   }
 
+  // 2) 回退：原来的关键词推荐
   if (!reply) {
-    const lower = text.toLowerCase()
-    const rule = fallbackRules.find(r => r.keys.some(k => lower.includes(k)))
-    reply = rule ? rule.reply : '暂时没有找到相关宝贝，可以换个关键词试试，比如"耳机"、"台灯"、"高数书"。'
+    try {
+      const recommendGoods = await askRecommend(text)
+      if (recommendGoods) {
+        goods = recommendGoods
+        reply = 'AI 服务暂时不可用，我先用关键词帮你找到了这些宝贝，点击查看详情～'
+      }
+    } catch (e) {
+      // 继续走本地规则
+    }
   }
+
+  // 3) 兜底：本地规则
+  if (!reply) reply = askLocalRule(text)
 
   // 模拟思考时间，提升对话体验
   await new Promise(resolve => setTimeout(resolve, 500))
   typing.value = false
-  addMessage('ai', reply, recommendGoods)
+  addMessage('ai', reply, goods, sources, mode)
 }
 
 function sendQuick(q) {
@@ -96,7 +157,13 @@ function viewGoods() {
 function saveHistory() {
   const history = messages.value
     .filter(m => m.text)
-    .map(m => ({ type: m.type, text: m.text, goods: m.goods.map(g => g.id) }))
+    .map(m => ({
+      type: m.type,
+      text: m.text,
+      mode: m.mode,
+      goods: m.goods.map(g => g.id),
+      sources: m.sources
+    }))
   localStorage.setItem('chatHistory', JSON.stringify(history.slice(-50)))
 }
 
@@ -111,6 +178,8 @@ async function loadHistory() {
       .map(m => ({
         type: m.type,
         text: m.text,
+        mode: m.mode || '',
+        sources: m.sources || [],
         goods: (m.goods || []).map(id => allGoods.find(g => g.id === id)).filter(Boolean)
       }))
   } catch {
@@ -124,9 +193,15 @@ function clearHistory() {
   addMessage('ai', '对话已清空，有什么可以帮你的吗？')
 }
 
+function modeLabel(mode) {
+  if (mode === 'api') return 'AI 生成'
+  if (mode === 'extractive') return '资料摘录'
+  return ''
+}
+
 onMounted(() => {
   if (messages.value.length === 0) {
-    addMessage('ai', '你好，我是校园小助手 🎓 想找什么宝贝？告诉我关键词，我帮你找！')
+    addMessage('ai', '你好，我是校园小助手 🎓 想找什么宝贝？也可以问我平台规则，比如"怎么退款"，我会附上依据来源。')
   } else {
     loadHistory()
   }
@@ -139,7 +214,7 @@ onMounted(() => {
       <img class="bot-avatar" src="/images/机器人.png" alt="客服">
       <div>
         <div class="bot-name">校园小助手</div>
-        <div class="bot-status">在线 · 关键词帮你找宝贝</div>
+        <div class="bot-status">在线 · 检索增强问答（RAG）</div>
       </div>
       <div class="header-actions">
         <el-button size="small" text class="clear-btn" @click="clearHistory">清空</el-button>
@@ -151,7 +226,19 @@ onMounted(() => {
       <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.type">
         <img v-if="msg.type === 'ai'" class="msg-avatar" src="/images/机器人.png" alt="AI">
         <div class="bubble-wrap">
-          <div class="message-content">{{ msg.text }}</div>
+          <div class="message-content">
+            <span class="msg-text">{{ msg.text }}</span><span v-if="msg.type === 'ai' && modeLabel(msg.mode)" class="mode-tag">{{ modeLabel(msg.mode) }}</span>
+          </div>
+
+          <!-- 依据来源：知识库条目 -->
+          <div v-if="faqSources(msg.sources).length" class="source-box">
+            <div class="source-header">依据来源</div>
+            <div v-for="(s, si) in faqSources(msg.sources)" :key="si" class="source-item">
+              <div class="source-title">{{ s.title }}</div>
+              <div class="source-snippet">{{ s.snippet }}</div>
+            </div>
+          </div>
+
           <div v-if="msg.goods && msg.goods.length" class="goods-cards">
             <div v-for="g in msg.goods" :key="g.id" class="goods-card" @click="viewGoods(g)">
               <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
@@ -230,7 +317,38 @@ onMounted(() => {
   line-height: 1.6;
   word-break: break-word;
 }
+/* 抽取式回答是按行拼装的，需要保留换行；放在内层 span 上，避免模板缩进也被渲染 */
+.msg-text { white-space: pre-wrap; }
 .message.user .message-content { background: #ffd21e; color: #23201a; border: none; font-weight: 500; }
+.mode-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  font-size: 11px;
+  color: #8a6100;
+  background: #fff3c2;
+  border-radius: 8px;
+  vertical-align: middle;
+}
+.source-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fbfbfb;
+  border: 1px dashed #e0e0e0;
+  border-radius: 10px;
+}
+.source-header { font-size: 11px; color: #999; margin-bottom: 6px; }
+.source-item + .source-item { margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0; }
+.source-title { font-size: 12px; font-weight: 600; color: #8a6100; margin-bottom: 2px; }
+.source-snippet {
+  font-size: 12px;
+  color: #777;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
 .goods-cards { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 10px; }
 .goods-card {
   background: #fff;

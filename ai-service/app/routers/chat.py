@@ -33,6 +33,11 @@ def chat(req: ChatRequest):
     sources = _retrieve(question, req.top_k)
     snippets = [s["snippet"] for s in sources]
 
+    # 检索为空时不调模型：没有上下文就没有依据，直接走模板兜底。
+    # 这样即使配了云端 LLM 也不会凭空调侃，是 RAG 里最基本的幻觉抑制。
+    if not snippets:
+        return {"answer": build_extractive_answer([]), "mode": "extractive", "sources": []}
+
     try:
         prompt = RAG_QA.format(context=build_context(snippets), question=question)
         answer = llm.generate(prompt)

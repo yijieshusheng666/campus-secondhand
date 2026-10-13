@@ -8,13 +8,30 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 词袋降级模式的向量维度：固定值以保证跨请求可比
-TFIDF_DIM = 512
+# 词袋降级模式的向量维度：固定值以保证跨请求可比。
+# 512 维时短文本撞桶概率过高，实测「退款」与「主动」同桶，导致「怎么退款」
+# 命中 AirPods 等无关商品；提到 4096 维后撞桶概率降到可忽略。
+TFIDF_DIM = 4096
+
+# 词袋基线的停用词。这些词几乎出现在任何中文句子里，而词袋没有 IDF 加权，
+# 不滤掉就会凭一个虚词把无关文档顶到前面：
+# 实测「有没有便宜的台灯」曾以 0.2085 命中「修改昵称」，唯一共享词就是「的」。
+STOPWORDS = {
+    "的", "了", "吗", "呢", "啊", "吧", "呀", "哦", "嘛", "的话",
+    "是", "在", "有", "没", "和", "与", "或", "就", "都", "也", "很", "太", "还",
+    "我", "你", "他", "她", "它", "们", "这", "那", "个", "一", "些",
+    "会", "要", "想", "能", "可", "可以", "怎么", "什么", "哪个", "哪些",
+    "请问", "帮我", "有没有", "多少", "如何", "为什么", "一下",
+}
 
 
 def _jieba_tokenize(text: str) -> list[str]:
+    """分词后滤掉停用词与单字，作为词袋基线的一步基本清洗。"""
     import jieba
-    return [t for t in jieba.cut(text) if t.strip()]
+    return [
+        t for t in jieba.cut(text)
+        if t.strip() and len(t) > 1 and t not in STOPWORDS
+    ]
 
 
 def _l2_normalize(matrix: np.ndarray) -> np.ndarray:
