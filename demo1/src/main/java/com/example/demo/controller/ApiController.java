@@ -28,6 +28,7 @@ import com.example.demo.entity.User;
 import com.example.demo.repository.GoodsImageRepository;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.UserRepository;
+import com.example.demo.service.AiClient;
 
 @RestController
 @RequestMapping("/api")
@@ -47,6 +48,9 @@ public class ApiController {
 
     @Autowired
     private GoodsImageRepository goodsImageRepository;
+
+    @Autowired
+    private AiClient aiClient;
 
     // 获取商品列表：支持分类、关键词筛选，已售商品不下架但不在列表中展示
     @GetMapping("/goods")
@@ -134,6 +138,9 @@ public class ApiController {
                     }
                 }
             }
+
+            // 发布成功后推送索引，使新商品立即能被语义搜索命中；失败不影响发布结果
+            aiClient.indexGoods(goods.getId(), AiController.buildIndexText(goods));
 
             return ResponseEntity.ok("{\"success\":true,\"goodsId\":" + goods.getId() + "}");
         } catch (Exception e) {
