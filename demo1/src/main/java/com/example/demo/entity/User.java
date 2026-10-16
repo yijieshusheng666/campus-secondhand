@@ -26,6 +26,9 @@ public class User {
     // B4 纠纷仲裁：只有 role = admin 的账号可以裁决纠纷
     private String role;
 
+    // 头像：只允许用内置的 4 张（白名单见 UserController.AVATARS），为空时前端回退成昵称首字
+    private String avatar;
+
     private LocalDateTime createdAt;
 
     @PrePersist
@@ -96,6 +99,15 @@ public class User {
 
     public void setRole(String role) {
         this.role = role;
+    }
+
+    /** 内置头像 key（avatar-1..4）；没选过为 null，前端按昵称首字显示。 */
+    public String getAvatar() {
+        return avatar;
+    }
+
+    public void setAvatar(String avatar) {
+        this.avatar = avatar;
     }
 
     public boolean isAdmin() {

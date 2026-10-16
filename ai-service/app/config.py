@@ -52,6 +52,16 @@ class Settings:
         self.rerank_min_ratio = float(os.getenv("RERANK_MIN_RATIO", "0.4"))
         # 绝对可信度参照值：最高向量分低于它时，判定"相对排第一不可信"，整体下调置信度
         self.vec_confidence_ref = float(os.getenv("VEC_CONFIDENCE_REF", "0.25"))
+        # 向量模式的置信度斜坡：绝对余弦 ≤ floor 视为不相关、≥ ceil 视为确定相关，中间线性映射。
+        # 为什么必须用绝对值：bge 的余弦普遍偏高，而两路召回原来是「相对本查询最高分」归一，
+        # 在向量模式下会双双饱和到 1.0，任何问题都拿满分（实测「量子纠缠退相干」也得 1.0）。
+        # 2026-10-14 用 bge-small-zh-v1.5 实测标定：库内问题最高余弦 0.636-0.850，
+        # 库外 0.319-0.502，取 floor=0.45 / ceil=0.75 可把两类干净分开。
+        self.vec_ramp_floor = float(os.getenv("VEC_RAMP_FLOOR", "0.45"))
+        self.vec_ramp_ceil = float(os.getenv("VEC_RAMP_CEIL", "0.75"))
+        # BM25 绝对强命中（精确关键词）的加分上限：bm25_score / bm25_strong 封顶到 1
+        self.bm25_strong = float(os.getenv("BM25_STRONG", "8.0"))
+        self.vec_bonus_weight = float(os.getenv("VEC_BONUS_WEIGHT", "0.2"))
         self.max_hits = int(os.getenv("MAX_HITS", "4"))
         # 置信度低于该值强制拒答（需求 §2.1.3）
         self.refuse_threshold = float(os.getenv("REFUSE_THRESHOLD", "0.35"))

@@ -2,11 +2,16 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { useCurrentUser } from '../composables/useCurrentUser'
 import SectionTabs from '../components/SectionTabs.vue'
 
 const router = useRouter()
-const user = JSON.parse(localStorage.getItem('user') || 'null')
+const user = useCurrentUser()
+
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const wantedApi = useApiRequest('求购操作失败')
 
 const categories = ['不限', '电子产品', '图书教材', '生活用品', '运动户外', '二手家具', '美妆护肤']
 
@@ -46,11 +51,11 @@ async function loadWanted() {
   loading.value = true
   try {
     const mineResp = user
-      ? await request.get('/wanted', { params: { userId: user.id } })
+      ? await wantedApi.get('/wanted', { params: { userId: user.value.id } })
       : { data: { data: [] } }
     myList.value = mineResp.data.data || []
   } catch (e) {
-    ElMessage.error('求购列表加载失败')
+    // useApiRequest 已统一提示
   } finally {
     loading.value = false
   }
@@ -68,8 +73,8 @@ async function publish() {
   }
   publishing.value = true
   try {
-    const { data } = await request.post('/wanted', {
-      userId: user.id,
+    const { data } = await wantedApi.post('/wanted', {
+      userId: user.value.id,
       title: form.value.title,
       category: form.value.category,
       maxPrice: form.value.maxPrice,
@@ -86,7 +91,7 @@ async function publish() {
       ElMessage.error(data.message || '发布失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '发布失败，请检查后端服务')
+    // useApiRequest 已统一提示
   } finally {
     publishing.value = false
   }
@@ -95,14 +100,14 @@ async function publish() {
 async function findMatches(wanted) {
   loadingMatch.value = wanted.id
   try {
-    const { data } = await request.get(`/wanted/${wanted.id}/matches`)
+    const { data } = await wantedApi.get(`/wanted/${wanted.id}/matches`)
     matches.value = { ...matches.value, [wanted.id]: data.data || [] }
     matchMeta.value = { ...matchMeta.value, [wanted.id]: collectMeta(data) }
     if (!data.data?.length) {
       ElMessage.info(`已比对站上 ${data.scanned} 件商品，暂时没有能买的匹配项`)
     }
   } catch (e) {
-    ElMessage.error('匹配失败，请检查后端服务')
+    // useApiRequest 已统一提示
   } finally {
     loadingMatch.value = 0
   }
@@ -115,7 +120,7 @@ async function closeWanted(wanted) {
     return
   }
   try {
-    const { data } = await request.post(`/wanted/${wanted.id}/close`, { userId: user.id })
+    const { data } = await wantedApi.post(`/wanted/${wanted.id}/close`, { userId: user.value.id })
     if (data.success) {
       ElMessage.success(data.message)
       await loadWanted()
@@ -123,7 +128,7 @@ async function closeWanted(wanted) {
       ElMessage.error(data.message || '关闭失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '关闭失败')
+    // useApiRequest 已统一提示
   }
 }
 
@@ -146,7 +151,7 @@ onMounted(loadWanted)
 
     <!-- 发布求购 -->
     <el-card class="post-card" shadow="never">
-      <h2 class="post-title">我要求购 🎯</h2>
+      <h2 class="post-title">我要求购</h2>
       <p class="post-sub">写下你想要的东西，系统会拿它去比对站上全部商品，把能买的挑出来。</p>
       <div class="form-row">
         <el-input v-model="form.title" maxlength="40" show-word-limit
@@ -174,7 +179,7 @@ onMounted(loadWanted)
         </div>
         <div v-if="justMatched.length" class="goods-grid">
           <div v-for="g in justMatched" :key="g.id" class="goods-card">
-            <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
+            <img v-img-fallback  loading="lazy" :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
             <div v-if="justMeta?.reasons?.[g.id]" class="gc-reason">{{ justMeta.reasons[g.id] }}</div>
@@ -209,7 +214,7 @@ onMounted(loadWanted)
         <div v-if="matches[w.id]" class="goods-grid">
           <el-empty v-if="matches[w.id].length === 0" description="暂无匹配且在售的宝贝" :image-size="60" />
           <div v-for="g in matches[w.id]" :key="g.id" class="goods-card">
-            <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
+            <img v-img-fallback  loading="lazy" :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
             <div v-if="matchMeta[w.id]?.reasons?.[g.id]" class="gc-reason">

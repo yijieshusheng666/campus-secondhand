@@ -2,11 +2,17 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { useCurrentUser } from '../composables/useCurrentUser'
 
 const router = useRouter()
+
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const api = useApiRequest('操作失败，请检查后端服务')
+
 const categories = ['电子产品', '图书教材', '生活用品', '运动户外', '二手家具', '美妆护肤']
-const form = reactive({ title: '', category: '电子产品', price: null, description: '', courseCode: '' })
+const form = reactive({ title: '', category: '电子产品', price: null, description: '' })
 const fileList = ref([])
 const uploadRef = ref(null)
 const submitting = ref(false)
@@ -26,7 +32,7 @@ async function suggestPrice() {
   priceLoading.value = true
   priceHint.value = null
   try {
-    const { data } = await request.get('/ai/price-suggest', {
+    const { data } = await api.get('/ai/price-suggest', {
       params: { title: form.title, category: form.category, description: form.description }
     })
     if (data.available) {
@@ -67,7 +73,7 @@ async function recognizeImage() {
   recognizing.value = true
   try {
     const image = await fileToBase64(raw)
-    const { data } = await request.post('/ai/vision', { image, mime: raw.type || 'image/jpeg' })
+    const { data } = await api.post('/ai/vision', { image, mime: raw.type || 'image/jpeg' })
     if (!data.available) {
       ElMessage.info({ message: data.message || '图片识别暂不可用', duration: 4000 })
       return
@@ -87,7 +93,7 @@ async function recognizeImage() {
 // A6：发布前先过一遍内容风控，block 直接拦下，warn 让用户确认
 async function checkContent() {
   try {
-    const { data } = await request.post('/ai/moderate', {
+    const { data } = await api.post('/ai/moderate', {
       title: form.title, description: form.description
     })
     return data
@@ -97,7 +103,7 @@ async function checkContent() {
 }
 
 onMounted(() => {
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = useCurrentUser()
   if (!user) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
@@ -120,7 +126,7 @@ async function onPublish() {
     ElMessage.warning('请填写完整信息')
     return
   }
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = useCurrentUser()
   if (!user) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
@@ -148,15 +154,14 @@ async function onPublish() {
   formData.append('category', form.category)
   formData.append('price', form.price)
   formData.append('description', form.description.trim())
-  formData.append('courseCode', form.category === '图书教材' ? form.courseCode.trim() : '')
-  formData.append('userId', user.id)
+  formData.append('userId', user.value.id)
   fileList.value.forEach((f, i) => {
     formData.append('images', f.raw, `image${i}.jpg`)
   })
 
   submitting.value = true
   try {
-    const { data } = await request.post('/goods', formData)
+    const { data } = await api.post('/goods', formData)
     if (data.success) {
       // C1：发布后立刻反向撮合——看看有没有同学正在求购这件东西
       let hint = '发布成功'
@@ -195,12 +200,6 @@ async function onPublish() {
           <el-select v-model="form.category" style="width: 100%">
             <el-option v-for="c in categories" :key="c" :label="c" :value="c" />
           </el-select>
-        </el-form-item>
-        <!-- C2：教材类商品关联课程号，方便同学按课程找书 -->
-        <el-form-item v-if="form.category === '图书教材'" label="课程号 / 课程名">
-          <el-input v-model="form.courseCode" maxlength="30"
-            placeholder="例如：MA101 或 高等数学（同济版）" />
-          <div class="field-tip">填了之后，同学按课程号就能直接搜到这本书</div>
         </el-form-item>
         <el-form-item label="商品价格（元）">
           <div class="price-row">

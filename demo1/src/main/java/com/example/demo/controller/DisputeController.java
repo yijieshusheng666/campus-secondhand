@@ -25,6 +25,8 @@ import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.OrderRepository;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.OrderStateMachine;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 /**
  * 纠纷仲裁（B4）。
@@ -56,30 +58,30 @@ public class DisputeController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long orderId = longOf(body, "orderId");
-        Long initiatorId = longOf(body, "initiatorId");
+        Long orderId = RequestUtils.longOf(body, "orderId");
+        Long initiatorId = RequestUtils.longOf(body, "initiatorId");
         if (orderId == null || initiatorId == null) {
-            return ResponseEntity.badRequest().body(fail("缺少订单或申请人标识"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少订单或申请人标识"));
         }
 
         Order order = orderRepository.findById(orderId).orElse(null);
         if (order == null) {
-            return ResponseEntity.badRequest().body(fail("订单不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("订单不存在"));
         }
         if (!initiatorId.equals(order.getBuyerId())) {
-            return ResponseEntity.badRequest().body(fail("只有买家可以申请平台介入"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("只有买家可以申请平台介入"));
         }
         if (!OrderStateMachine.SHIPPED.equals(order.getStatus())) {
-            return ResponseEntity.badRequest().body(fail(
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
                     "只有「已发货」的订单可以申请平台介入，当前状态是「" + order.getStatus() + "」"));
         }
         if (disputeRepository.existsByOrderIdAndStatus(orderId, Dispute.STATUS_PENDING)) {
-            return ResponseEntity.badRequest().body(fail("这笔订单已有待处理的纠纷"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这笔订单已有待处理的纠纷"));
         }
 
-        String detail = text(body, "detail");
+        String detail = RequestUtils.textOf(body, "detail");
         if (detail.length() > MAX_DETAIL) {
-            return ResponseEntity.badRequest().body(fail("说明不能超过 " + MAX_DETAIL + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("说明不能超过 " + MAX_DETAIL + " 字"));
         }
 
         Dispute dispute = new Dispute();
@@ -88,29 +90,26 @@ public class DisputeController {
         dispute.setGoodsTitle(order.getGoodsTitle());
         dispute.setInitiatorId(initiatorId);
         dispute.setRespondentId(order.getSellerId());
-        dispute.setReason(text(body, "reason").isEmpty() ? "其他" : text(body, "reason"));
+        dispute.setReason(RequestUtils.textOf(body, "reason").isEmpty() ? "其他" : RequestUtils.textOf(body, "reason"));
         dispute.setDetail(detail);
         disputeRepository.save(dispute);
 
         // 订单进入仲裁中：货款继续冻结在平台，等判定
         applyOrderStatus(order, OrderStateMachine.DISPUTED);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("disputeId", dispute.getId());
-        result.put("orderStatus", order.getStatus());
-        result.put("message", "已提交平台介入，货款将冻结至裁决完成");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("disputeId", dispute.getId());
+        extras.put("orderStatus", order.getStatus());
+        return ResponseEntity.ok(ApiResponses.ok("已提交平台介入，货款将冻结至裁决完成", extras));
     }
 
     // 我发起或收到的纠纷
     @GetMapping
     public ResponseEntity<?> list(@RequestParam Long userId) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", view(disputeRepository
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", view(disputeRepository
                 .findByInitiatorIdOrRespondentIdOrderByCreatedAtDesc(userId, userId)));
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 管理端：待处理纠纷
@@ -118,37 +117,36 @@ public class DisputeController {
     public ResponseEntity<?> pending(@RequestParam Long handlerId) {
         User handler = userRepository.findById(handlerId).orElse(null);
         if (handler == null || !ROLE_ADMIN.equals(handler.getRole())) {
-            return ResponseEntity.badRequest().body(fail("只有平台管理员可以查看待处理纠纷"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("无权查看该列表"));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", view(disputeRepository
-                .findByStatusOrderByCreatedAtAsc(Dispute.STATUS_PENDING)));
-        result.put("handledList", view(disputeRepository
-                .findByStatusOrderByHandledAtDesc(Dispute.STATUS_HANDLED)));
-        result.put("handled", disputeRepository.countByStatus(Dispute.STATUS_HANDLED));
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", view(disputeRepository.findByStatusOrderByCreatedAtDesc(Dispute.STATUS_PENDING)));
+        extras.put("handledList", view(disputeRepository.findByStatusOrderByCreatedAtDesc(Dispute.STATUS_HANDLED)));
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
-    // 管理端：裁定
+    // 管理员裁定纠纷
     @PostMapping("/{id}/rule")
     @Transactional
     public ResponseEntity<?> rule(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        Long handlerId = longOf(body, "handlerId");
-        User handler = handlerId == null ? null : userRepository.findById(handlerId).orElse(null);
+        Long handlerId = RequestUtils.longOf(body, "handlerId");
+        if (handlerId == null) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少处理人标识"));
+        }
+        User handler = userRepository.findById(handlerId).orElse(null);
         if (handler == null || !ROLE_ADMIN.equals(handler.getRole())) {
-            return ResponseEntity.badRequest().body(fail("只有平台管理员可以裁定纠纷"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("只有平台管理员可以裁定纠纷"));
         }
 
         Dispute dispute = disputeRepository.findById(id).orElse(null);
         if (dispute == null) {
-            return ResponseEntity.badRequest().body(fail("纠纷不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("纠纷不存在"));
         }
         if (!Dispute.STATUS_PENDING.equals(dispute.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("这条纠纷已经裁定过了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这条纠纷已经裁定过了"));
         }
 
-        String ruling = text(body, "ruling");
+        String ruling = RequestUtils.textOf(body, "ruling");
         String target;
         if (Dispute.RULING_BUYER.equals(ruling)) {
             target = OrderStateMachine.REFUNDED;     // 支持买家：货款退回
@@ -156,36 +154,35 @@ public class DisputeController {
             target = OrderStateMachine.FINISHED;     // 驳回诉求：视为完成，货款放给卖家
         } else {
             return ResponseEntity.badRequest().body(
-                    fail("裁定结果只能是「" + Dispute.RULING_BUYER + "」或「" + Dispute.RULING_SELLER + "」"));
+                    ApiResponses.fail("裁定结果只能是「" + Dispute.RULING_BUYER + "」或「" + Dispute.RULING_SELLER + "」"));
         }
 
         Order order = orderRepository.findById(dispute.getOrderId()).orElse(null);
         if (order == null) {
-            return ResponseEntity.badRequest().body(fail("关联订单已不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("关联订单已不存在"));
         }
         if (!OrderStateMachine.canTransfer(order.getStatus(), target)) {
-            return ResponseEntity.badRequest().body(fail(
-                    "订单当前状态「" + order.getStatus() + "」不允许该裁定：" 
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "订单当前状态「" + order.getStatus() + "」不允许该裁定："
                             + OrderStateMachine.describeNext(order.getStatus())));
         }
 
         dispute.setStatus(Dispute.STATUS_HANDLED);
         dispute.setRuling(ruling);
-        dispute.setRulingNote(text(body, "note"));
+        dispute.setRulingNote(RequestUtils.textOf(body, "note"));
         dispute.setHandlerId(handlerId);
         dispute.setHandledAt(LocalDateTime.now());
         disputeRepository.save(dispute);
 
         applyOrderStatus(order, target);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("orderStatus", order.getStatus());
-        result.put("escrowStatus", order.getEscrowStatus());
-        result.put("message", Dispute.RULING_BUYER.equals(ruling)
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("orderStatus", order.getStatus());
+        extras.put("escrowStatus", order.getEscrowStatus());
+        String msg = Dispute.RULING_BUYER.equals(ruling)
                 ? "已裁定支持买家，货款退回买家，商品重新上架"
-                : "已驳回买家诉求，交易完成，货款放给卖家");
-        return ResponseEntity.ok(result);
+                : "已驳回买家诉求，交易完成，货款放给卖家";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     /** 复用状态机的资金规则，避免仲裁另起一套状态。 */
@@ -235,29 +232,5 @@ public class DisputeController {
 
     private String nameOf(Long userId, String fallback) {
         return userRepository.findById(userId).map(User::getUsername).orElse(fallback);
-    }
-
-    private String text(Map<String, Object> body, String key) {
-        Object value = body == null ? null : body.get(key);
-        return value == null ? "" : value.toString().trim();
-    }
-
-    private Long longOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
     }
 }

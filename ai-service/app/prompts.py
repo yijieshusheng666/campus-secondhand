@@ -1,30 +1,9 @@
-"""Prompt 模板集中管理，避免散落在业务代码里。"""
+"""Prompt 模板集中管理，避免散落在业务代码里。
 
-RAG_SYSTEM = (
-    "你是校园二手交易平台的智能助手，只依据提供的资料回答问题。"
-    "资料中没有的内容不要编造，可以建议用户换个说法再问。回答要简短、口语化。"
-)
-
-RAG_QA = """请只依据下面的资料回答用户问题。
-
-资料：
-{context}
-
-用户问题：{question}
-
-回答："""
-
-
-def build_extractive_answer(snippets: list[str]) -> str:
-    """抽取式降级：不做生成，直接拼装检索到的原文片段。"""
-    if not snippets:
-        return "抱歉，暂时没有找到相关资料。可以换个说法再问我，比如直接说商品名称或想问的业务（例如「怎么退款」）。"
-    lines = "\n".join(f"{i + 1}. {s}" for i, s in enumerate(snippets))
-    return f"根据平台资料，我找到以下相关信息：\n{lines}\n\n如果还需要更详细的说明，可以继续问我～"
-
-
-def build_context(snippets: list[str]) -> str:
-    return "\n".join(f"- {s}" for s in snippets)
+注意：RAG 的模板只在本文件「RAG 客服」段定义一次。
+早先版本在文件开头还有一套同名的 RAG_SYSTEM / RAG_QA / build_context，
+后面的定义会把它们覆盖掉 —— 留着只会让人改到根本没生效的那一份，已删除。
+"""
 
 
 # ---- P1 助手类能力（A5）----
@@ -86,17 +65,88 @@ RAG_QA = """请只依据下面的知识库条目回答用户问题。
 
 【知识条目】
 {context}
-
+{history}
 【回答要求】
-1. 操作类问题按「第1步…第2步…」分点输出；
-2. 结尾用一行注明依据的条目编号，例如「依据：G003（平台操作手册 §4 下单与支付）」；
-3. 知识条目里没有的信息，回答「这个我这边没有明确说明，建议问平台管理员」，不要推测。
+1. 直接回答用户的问题。不要复述用户的问题，也不要写「我找到以下相关信息」这类过程性的话；
+2. 操作类问题用「第1步…第2步…」一行一步输出，方便用户照着做；
+3. 只使用知识条目里的事实。条目里没有的信息，回答「这个我这边没有明确说明，建议问平台管理员」，
+   不要用常识推测，也不要编造规则；
+4. 涉及「上面提到的那件」「它」这类指代时，结合【最近的对话】理解用户在说什么。
 
 【用户问题】
 {question}
 
 【回答】
 """
+
+
+# ---- 个人数据问答（助手不再只会念规则，也能回答"我的"）----
+#
+# 之前助手的能力边界是"查静态知识库"，所以「我有几件闲置」「我的求购有人接了吗」
+# 这类问题一个都答不了 —— 知识库里根本没有用户数据，检索必然低于拒答阈值，
+# 最后只能回一句"没找到依据"。而这恰恰是学生打开二手平台最想问的。
+#
+# 现在由调用方（前端）把当前登录用户的站内数据压成一小段文本传进来，
+# 个人类问题直接走这条路：不再检索知识库、不再判拒答，只让模型基于真实数据回答。
+
+PERSONAL_MARKERS = (
+    "我的", "我卖", "我买", "我发布", "我求购", "我下过", "我在售",
+    "我有几件", "我出了", "我赚", "我卖了多少", "我有多少", "我的东西",
+)
+
+
+def is_personal_question(question: str, personal_context: str) -> bool:
+    """判断这个问题该不该走个人数据通路。
+
+    两个条件都要满足：
+      1. 调用方确实带上了站内数据（未登录 / 没数据时不走这条路）；
+      2. 问题里有第一人称 + 我的/我的这类指向。
+    宁可漏判也不要误判 —— 把"怎么退款"这种通用规则问题错当成个人问题，
+    会让模型在一个空的个人数据集上硬编，反而比原来的拒答更糟。
+    """
+    if not (personal_context or "").strip():
+        return False
+    return any(m in (question or "") for m in PERSONAL_MARKERS)
+
+
+PERSONAL_QA = """你是校内二手交易平台的智能助手。下面是**当前登录用户本人**的站内数据。
+
+【我的站内数据】
+{personal}
+{history}
+【回答要求】
+1. 只依据上面的「我的站内数据」回答，不要去讲通用规则；
+2. 数据里没有的，就直说「你名下没有这类记录」，绝对不要编；
+3. 一两句话说清结论。需要列举时最多列 5 条，每条一行，格式「标题 · ¥价格 · 状态」；
+4. 结尾可以顺带提一句下一步能做什么（例如去求购广场看看有没有人接），最多一句；
+5. 语气简短口语化，不要客套开场白，不要复述用户的问题。
+
+【用户问题】
+{question}
+
+【回答】
+"""
+
+
+def build_history_block(history: list[dict] | None) -> str:
+    """把最近几轮对话拼成提示词片段，没有历史就返回空串。
+
+    检索侧（lexicon.build_query_variants）已经用历史做查询改写，
+    生成侧同样需要：否则「那退款呢」「它多少钱」这类追问进了模型眼里就是孤立的一句，
+    模型只能硬答或者反问，多轮上下文等于白传。
+    """
+    if not history:
+        return ""
+    lines = []
+    for item in history[-6:]:
+        content = str(item.get("content", "")).strip()
+        if not content:
+            continue
+        role = "助手" if item.get("role") in ("assistant", "ai") else "用户"
+        lines.append(f"{role}：{content}")
+    if not lines:
+        return ""
+    return "\n【最近的对话】\n" + "\n".join(lines) + "\n"
 
 # 标准拒答话术（需求 §2.1.3：置信度低于阈值强制拒答，不强行生成）
 REFUSAL_ANSWER = (
@@ -122,8 +172,8 @@ SAFETY_RULES = [
 # 模糊问题引导（需求 §2.1.4）
 FUZZY_RULES = [
     (["卖东西", "怎么卖", "卖什么", "我想卖"],
-     "想卖东西的话建议这样起步：① 教材教辅填上课程号，成交率最高；"
-     "② 数码类要拍开机界面并如实说明瑕疵；"
+     "想卖东西的话建议这样起步：① 数码类要拍开机界面并如实说明瑕疵，写清型号和配件；"
+     "② 教材教辅在标题里写清课程名、作者和版次，方便同学搜到；"
      "③ 生活电器建议发起宿舍楼拼单，方便同楼同学一起取货。"),
     (["买什么", "买啥", "想买"],
      "可以直接说具体品类或场景（比如「降噪耳机」「高数教材」「宿舍台灯」），"
@@ -145,18 +195,51 @@ def build_context(hits) -> str:
     return "\n\n".join(blocks)
 
 
+# 抽取式答案的主体最多取几行：太少答不全，太多又变成"把检索结果糊上去"
+EXTRACTIVE_MAX_POINTS = 5
+
+
 def build_structured_answer(hits) -> str:
-    """抽取式降级答案：按知识正文里的换行做分点，保证可读性。"""
+    """没有大模型时的抽取式答案。
+
+    原则：内容仍然**逐字来自知识库**（可溯源、不编造），但组织方式要像"回答"而不是"检索结果罗列"：
+      - 只用最相关的那一条做主体，内容确实互补时再补一条，不堆三条同类条目；
+      - 不写「根据平台规则，我找到以下相关信息」这类过程话，正文直接就是答案；
+      - 正文不掺任何「依据/来源/编号」标注 —— 溯源信息由前端单独渲染，混进正文只会被当成噪声。
+    """
     if not hits:
         return REFUSAL_ANSWER
-    lines = ["根据平台规则，我找到以下相关信息："]
-    for hit in hits[:3]:
-        content = (hit.content or "").strip()
-        points = [p.strip() for p in content.split("\n") if p.strip()][:4]
-        body = "\n".join(points)
-        lines.append(f"\n{hit.title}（依据 {hit.id}·{hit.source}）\n{body}")
-    lines.append("\n如果还有疑问，可以换个说法再问我，或者在「我的订单」里申请平台介入。")
-    return "\n".join(lines)
+
+    main = hits[0]
+    blocks = [_extractive_body(main)]
+
+    # 次优条目只在"讲的不是同一件事"时补进来，避免同主题条目反复说同一句话
+    for extra in hits[1:]:
+        if _is_duplicate_topic(main, extra):
+            continue
+        blocks.append(_extractive_body(extra))
+        break
+
+    return "\n\n".join(blocks)
+
+
+def _extractive_body(hit) -> str:
+    """条目正文：本来就是分点的原样保留，单段的就直接给这一段。"""
+    points = [p.strip() for p in (hit.content or "").split("\n") if p.strip()]
+    if not points:
+        return hit.title
+    return "\n".join(points[:EXTRACTIVE_MAX_POINTS])
+
+
+def _is_duplicate_topic(a, b) -> bool:
+    """两条条目是否在讲同一件事：分片相同 + 标题有重叠词，就认为不必都答。"""
+    if getattr(a, "shard", "") != getattr(b, "shard", ""):
+        return False
+    title_a = set(str(getattr(a, "title", "")))
+    title_b = set(str(getattr(b, "title", "")))
+    if not title_a or not title_b:
+        return False
+    return len(title_a & title_b) / max(len(title_a), len(title_b)) > 0.5
 
 
 def pick_safety_tip(question: str) -> str:

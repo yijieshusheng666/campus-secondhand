@@ -17,6 +17,7 @@ from app.prompts import (
     RAG_QA,
     REFUSAL_ANSWER,
     build_context,
+    build_history_block,
     build_structured_answer,
     pick_fuzzy_hint,
     pick_safety_tip,
@@ -59,7 +60,7 @@ def _sources(hits) -> list[dict]:
     ]
 
 
-def _compose(question: str, hits, trace, trace_id: str, top_k: int) -> dict:
+def _compose(question: str, hits, trace, trace_id: str, top_k: int, history=None) -> dict:
     """置信度判定 + 生成 + 合规后处理。"""
     # 置信度低于阈值强制拒答，不强行生成（需求 §2.1.3）
     refused = (not hits) or hits[0].confidence < settings.refuse_threshold
@@ -70,7 +71,8 @@ def _compose(question: str, hits, trace, trace_id: str, top_k: int) -> dict:
     else:
         try:
             answer = llm.generate(RAG_QA.format(
-                context=build_context(hits[:top_k]), question=question))
+                context=build_context(hits[:top_k]), question=question,
+                history=build_history_block(history)))
             mode = "api"
         except LLMUnavailable:
             answer = build_structured_answer(hits[:top_k])
@@ -126,4 +128,4 @@ def chat(req: ChatRequest):
         })
         trace_id = span.trace_id
 
-    return _compose(question, hits, trace, trace_id, top_k)
+    return _compose(question, hits, trace, trace_id, top_k, history=history)

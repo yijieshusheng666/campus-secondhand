@@ -103,7 +103,7 @@ INTENT_PATTERNS = [
     ("价格", ["多少钱", "价格", "定价", "参考价", "便宜", "贵", "区间", "估价"]),
     ("面交", ["面交", "见面", "在哪交", "配送", "快递", "宿舍", "楼栋", "取货"]),
     ("禁售", ["禁售", "能卖吗", "可以卖", "违规", "禁止", "限售"]),
-    ("教材", ["教材", "课本", "书", "高数", "线代", "大英", "课程", "课程号"]),
+    ("教材", ["教材", "课本", "书", "高数", "线代", "大英", "课程"]),
 ]
 
 INTENT_SHARDS = {
@@ -161,14 +161,22 @@ def build_query_variants(raw_question: str, history=None) -> dict:
     cleaned = strip_noise(typo_fixed)
     variants, alias_hits = expand_aliases(cleaned)
 
-    # 多轮改写：当前问句太短时，把上一轮的核心词带过来（解决「那它呢」这类追问）
+    # 多轮改写：当前问句太短或带指代时，把上一轮的核心词带过来（解决「那它呢」这类追问）
+    # 只取**用户自己**说过的话：助手那一轮是整段回答，并进查询会把关键词稀释掉
+    # （实测把「参考区间 15-30 元。」并进去后，置信度反而从 0.3+ 掉到 0.29）。
     context_terms = []
     if history:
-        for turn in reversed(history[-2:]):
-            content = (turn.get("content") or "") if isinstance(turn, dict) else str(turn)
+        for turn in reversed(history[-3:]):
+            if not isinstance(turn, dict):
+                continue
+            role = turn.get("role")
+            if role and role not in ("user", "我"):
+                continue
+            content = turn.get("content") or ""
             if not content or content.strip() == raw_question.strip():
                 continue
-            context_terms.append(correct_typos(normalize(content)))
+            # 截断：用户问句一般很短，留 30 字足够带住话题，也避免长句污染查询
+            context_terms.append(correct_typos(normalize(content))[:30])
 
     intents = detect_intents(cleaned)
     seasons = detect_seasons(cleaned)

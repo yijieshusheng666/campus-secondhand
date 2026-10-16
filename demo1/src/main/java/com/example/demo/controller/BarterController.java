@@ -23,6 +23,8 @@ import com.example.demo.entity.User;
 import com.example.demo.repository.BarterRepository;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.UserRepository;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 /**
  * 以物换物（C4）。平台不涉及资金：双方同意后自行沟通交接。
@@ -48,32 +50,32 @@ public class BarterController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long goodsId = longOf(body, "goodsId");
-        Long requesterId = longOf(body, "requesterId");
+        Long goodsId = RequestUtils.longOf(body, "goodsId");
+        Long requesterId = RequestUtils.longOf(body, "requesterId");
         if (goodsId == null || requesterId == null) {
-            return ResponseEntity.badRequest().body(fail("请先登录"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
-            return ResponseEntity.badRequest().body(fail("商品不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
         }
         if (requesterId.equals(goods.getUserId())) {
-            return ResponseEntity.badRequest().body(fail("不能拿自己的东西跟自己换"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("不能拿自己的东西跟自己换"));
         }
-        String offerTitle = text(body, "offerTitle");
+        String offerTitle = RequestUtils.textOf(body, "offerTitle");
         if (offerTitle.isEmpty()) {
-            return ResponseEntity.badRequest().body(fail("请填写你打算用什么来换"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请填写你打算用什么来换"));
         }
         if (offerTitle.length() > MAX_OFFER) {
-            return ResponseEntity.badRequest().body(fail("换物物品不能超过 " + MAX_OFFER + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("换物物品不能超过 " + MAX_OFFER + " 字"));
         }
-        String offerDesc = text(body, "offerDesc");
+        String offerDesc = RequestUtils.textOf(body, "offerDesc");
         if (offerDesc.length() > MAX_DESC) {
-            return ResponseEntity.badRequest().body(fail("补充说明不能超过 " + MAX_DESC + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("补充说明不能超过 " + MAX_DESC + " 字"));
         }
         if (barterRepository.existsByGoodsIdAndRequesterIdAndStatus(
                 goodsId, requesterId, Barter.STATUS_PENDING)) {
-            return ResponseEntity.badRequest().body(fail("你已经对这件宝贝发起过换物请求了，等对方回应吧"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("你已经对这件宝贝发起过换物请求了，等对方回应吧"));
         }
 
         User requester = userRepository.findById(requesterId).orElse(null);
@@ -87,11 +89,9 @@ public class BarterController {
         barter.setOfferDesc(offerDesc);
         barterRepository.save(barter);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("barterId", barter.getId());
-        result.put("message", "换物请求已发出，等对方回应");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("barterId", barter.getId());
+        return ResponseEntity.ok(ApiResponses.ok("换物请求已发出，等对方回应", extras));
     }
 
     // 我发起的 + 我收到的
@@ -105,11 +105,10 @@ public class BarterController {
         for (Barter barter : barterRepository.findByOwnerIdOrderByCreatedAtDesc(userId)) {
             received.add(view(barter));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("sent", sent);
-        result.put("received", received);
-        return ResponseEntity.ok(result);
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("sent", sent);
+        data.put("received", received);
+        return ResponseEntity.ok(ApiResponses.ok("ok", data));
     }
 
     // 商品拥有者回应换物请求
@@ -118,29 +117,26 @@ public class BarterController {
     public ResponseEntity<?> respond(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Barter barter = barterRepository.findById(id).orElse(null);
         if (barter == null) {
-            return ResponseEntity.badRequest().body(fail("换物请求不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("换物请求不存在"));
         }
-        Long userId = longOf(body, "userId");
+        Long userId = RequestUtils.longOf(body, "userId");
         if (userId == null || !userId.equals(barter.getOwnerId())) {
-            return ResponseEntity.badRequest().body(fail("只有宝贝的主人可以回应换物请求"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("只有宝贝的主人可以回应换物请求"));
         }
         if (!Barter.STATUS_PENDING.equals(barter.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("这条换物请求已经回应过了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这条换物请求已经回应过了"));
         }
 
         boolean accept = Boolean.TRUE.equals(body.get("accept"))
-                || "true".equalsIgnoreCase(text(body, "accept"));
+                || "true".equalsIgnoreCase(RequestUtils.textOf(body, "accept"));
         barter.setStatus(accept ? Barter.STATUS_AGREED : Barter.STATUS_REJECTED);
         barter.setRespondedAt(LocalDateTime.now());
         barterRepository.save(barter);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("status", barter.getStatus());
-        result.put("message", accept
-                ? "已同意换物，去消息里和对方约个时间吧"
-                : "已拒绝该换物请求");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("status", barter.getStatus());
+        String msg = accept ? "已同意换物，去消息里和对方约个时间吧" : "已拒绝该换物请求";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     private Map<String, Object> view(Barter barter) {
@@ -157,29 +153,5 @@ public class BarterController {
         item.put("createdAt", barter.getCreatedAt());
         item.put("respondedAt", barter.getRespondedAt());
         return item;
-    }
-
-    private String text(Map<String, Object> body, String key) {
-        Object value = body == null ? null : body.get(key);
-        return value == null ? "" : value.toString().trim();
-    }
-
-    private Long longOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
     }
 }

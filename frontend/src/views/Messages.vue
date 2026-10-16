@@ -2,12 +2,17 @@
 import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { useCurrentUser } from '../composables/useCurrentUser'
 
 const route = useRoute()
 const router = useRouter()
 
-const user = JSON.parse(localStorage.getItem('user') || 'null')
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const api = useApiRequest('操作失败，请检查后端服务')
+
+const user = useCurrentUser()
 
 const conversations = ref([])   // { goodsId, goodsTitle, peerId, peerName, lastContent, lastTime }
 const active = ref(null)        // 当前正在沟通的会话
@@ -45,7 +50,7 @@ function scrollToBottom() {
 async function loadConversations() {
   if (!user) return
   try {
-    const { data } = await request.get('/messages/conversations', { params: { userId: user.id } })
+    const { data } = await api.get('/messages/conversations', { params: { userId: user.value.id } })
     conversations.value = data
   } catch (e) {
     // 静默失败，避免轮询时反复弹提示
@@ -56,8 +61,8 @@ async function loadMessages() {
   if (!active.value) return
   loading.value = true
   try {
-    const { data } = await request.get('/messages', {
-      params: { goodsId: active.value.goodsId, userId: user.id, peerId: active.value.peerId }
+    const { data } = await api.get('/messages', {
+      params: { goodsId: active.value.goodsId, userId: user.value.id, peerId: active.value.peerId }
     })
     messages.value = data
     scrollToBottom()
@@ -81,7 +86,7 @@ async function loadActiveGoods() {
   activeGoods.value = null
   if (!active.value?.goodsId) return null
   try {
-    const { data } = await request.get(`/goods/${active.value.goodsId}`)
+    const { data } = await api.get(`/goods/${active.value.goodsId}`)
     activeGoods.value = data
     return data
   } catch (e) {
@@ -110,7 +115,7 @@ async function resolveFromQuery() {
     goodsTitle = data.title
   } catch (e) { /* 商品可能已被删除 */ }
   try {
-    const { data } = await request.get(`/users/${peerId}`)
+    const { data } = await api.get(`/users/${peerId}`)
     peerName = data.username
   } catch (e) { /* 忽略 */ }
 
@@ -132,13 +137,13 @@ async function sendMessage() {
   }
   const payload = {
     goodsId: active.value.goodsId,
-    fromUserId: user.id,
+    fromUserId: user.value.id,
     toUserId: active.value.peerId,
     content: text
   }
   input.value = ''
   try {
-    const { data } = await request.post('/messages', payload)
+    const { data } = await api.post('/messages', payload)
     if (data.success) {
       await loadMessages()
       await loadConversations()
@@ -146,7 +151,7 @@ async function sendMessage() {
       ElMessage.error(data.message || '发送失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '发送失败，请检查后端服务')
+    // useApiRequest 已统一提示（或当前是 request.* 直调，由后端 message 自动展示）
   }
 }
 
@@ -154,7 +159,7 @@ async function sendMessage() {
 function currentTranscript() {
   return messages.value
     .filter(m => m.content)
-    .map(m => ({ role: m.fromUserId === user.id ? 'mine' : 'peer', content: m.content }))
+    .map(m => ({ role: m.fromUserId === user.value.id ? 'mine' : 'peer', content: m.content }))
 }
 
 // A5-1 对话摘要：总结与卖家的长对话，抽价格/见面约定/待确认事项
@@ -171,7 +176,7 @@ async function doSummarize() {
   assistMode.value = ''
   try {
     const goods = await loadActiveGoods()
-    const { data } = await request.post('/ai/summarize', {
+    const { data } = await api.post('/ai/summarize', {
       messages: currentTranscript(),
       goodsTitle: goods?.title || active.value.goodsTitle || '',
       goodsPrice: goods?.price ?? null
@@ -201,7 +206,7 @@ async function doNegotiate() {
   assistMode.value = ''
   try {
     const goods = await loadActiveGoods()
-    const { data } = await request.post('/ai/negotiate', {
+    const { data } = await api.post('/ai/negotiate', {
       goodsTitle: goods?.title || active.value.goodsTitle || '',
       goodsPrice: goods?.price ?? null,
       description: goods?.description || ''
@@ -279,8 +284,7 @@ onUnmounted(() => {
               <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
               <!-- 点卡片直接回首页看这件宝贝的详情 -->
               <div class="chat-goods-card" :class="{ empty: !active.goodsId }" @click="goGoods">
-                <img v-if="activeGoods?.images?.length" class="cg-img"
-                  :src="activeGoods.images[0].imageUrl" alt="宝贝">
+                <img  loading="lazy"v-if="activeGoods?.images?.length" class="cg-img" :src="activeGoods.images[0].imageUrl" alt="宝贝">
                 <div v-else class="cg-img cg-img-empty">🎁</div>
                 <div class="cg-body">
                   <div class="cg-title">{{ active.goodsTitle || '（商品信息缺失）' }}</div>

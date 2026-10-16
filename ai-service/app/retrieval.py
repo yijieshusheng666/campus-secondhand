@@ -11,6 +11,43 @@ from dataclasses import dataclass, field
 from app import lexicon
 from app.bm25 import BM25Index
 from app.config import settings
+from app.embedding import embedder
+
+
+def vector_confidence(vec_score: float, bm25_score: float) -> float:
+    """向量模式下的置信度：**绝对余弦**走斜坡 + BM25 绝对强命中的小幅加成。
+
+    为什么不能沿用 tfidf 那套「相对本查询最高分」归一：
+    两路归一后，本查询的 Top1 天然就是 bm25_norm=1、vec_norm=1，raw 直接 1.0；
+    唯一的绝对刹车 abs_factor = min(1, best_vec/0.25) 是按词袋余弦标的，
+    而 bge 的余弦普遍在 0.5-0.9，刹车永远不生效 —— 实测「量子纠缠退相干怎么处理」
+    也能拿 1.0 被当成正常回答。
+
+    改用绝对余弦后（2026-10-14 实测，65 条知识库）：
+      库内问题最高余弦 0.636~0.850；库外 0.319~0.502，斜坡线取 0.45/0.75 能干净分开。
+    """
+    span = max(settings.vec_ramp_ceil - settings.vec_ramp_floor, 1e-6)
+    ramp = (vec_score - settings.vec_ramp_floor) / span
+    ramp = min(1.0, max(0.0, ramp))
+    bonus = 0.0
+    if bm25_score > 0:
+        bonus = settings.vec_bonus_weight * min(1.0, bm25_score / max(settings.bm25_strong, 1e-6))
+    return round(min(1.0, ramp + bonus), 4)
+
+
+# 追问信号词：带指代 / 省略的说法，或者信息量很短的问句。
+# 命中这些才把上一轮的话题词并进查询 —— 否则会把「怎么退款」这种自足的问题也污染掉。
+FOLLOWUP_WORDS = ("那", "它", "这个", "那个", "上面", "刚才", "还有", "呢", "也一样", "同样")
+# 短于这个长度才算「信息量不足的追问」：6 字以内。
+# 注意是严格小于：「怎么申请退款」正好 6 字，它是自足的问题，不该被上一轮污染。
+FOLLOWUP_MAX_LEN = 6
+
+
+def _is_followup(question: str) -> bool:
+    """判断这句话是不是在上文基础上的追问（需要借上一轮的话题词去检索）。"""
+    if len(question) < FOLLOWUP_MAX_LEN:
+        return True
+    return any(word in question for word in FOLLOWUP_WORDS)
 
 
 @dataclass
@@ -72,10 +109,14 @@ class HybridRetriever:
         preferred = prep["shard_hints"] or prep["boost_shards"]
         allowed = self._ids_of_shards(preferred) if preferred else None
 
-        # 多路查询：原句 + 词典展开 +（问句过短时）上一轮核心词
+        # 多路查询：原句 + 词典展开 +（追问时）上一轮用户问句的关键词。
+        # 「那大英呢」「它多少钱」这类追问单独拿去检索必然召回不到，
+        # 必须把上一轮的话题词并进来。放在第 2 位是为了不被下面的 [:3] 截掉。
         queries = list(prep["variants"])
-        if len(queries[-1]) < 6 and prep["context_terms"]:
-            queries.append(queries[-1] + " " + " ".join(prep["context_terms"][-2:]))
+        if prep["context_terms"] and _is_followup(prep["normalized"]):
+            followup = f"{queries[0]} {' '.join(prep['context_terms'][-2:])}".strip()
+            if followup not in queries:
+                queries.insert(1, followup)
         queries = [q for q in dict.fromkeys(queries) if q][:3]
         trace["queries"] = queries
         if not queries:
@@ -126,6 +167,11 @@ class HybridRetriever:
         abs_factor = max(abs_factor, 0.15)   # 再低也留一线，避免误杀真实命中
         trace["absFactor"] = round(abs_factor, 4)
 
+        # 置信度算法随向量模式切换：词袋用「相对归一 × 绝对刹车」（已按 0.20 阈值标定），
+        # 向量用绝对余弦斜坡（词袋的相对归一在向量模式下会饱和失效）
+        use_vector_ramp = embedder.mode() == "vector"
+        trace["confidenceMode"] = "vector-ramp" if use_vector_ramp else "relative"
+
         for doc_id, rrf in fused.items():
             entry = self.entries.get(doc_id)
             if entry is None:
@@ -142,7 +188,11 @@ class HybridRetriever:
             # 两路都没证据的条目直接丢弃，别把 0 分的凑数条目返给前端
             if bm25_score <= 0 and vec_score <= settings.vec_min_score:
                 continue
-            confidence = round(raw_confidence * abs_factor, 4)
+            if use_vector_ramp:
+                # 向量模式：用绝对余弦算置信度（见 vector_confidence 的说明）
+                confidence = vector_confidence(vec_score, bm25_score)
+            else:
+                confidence = round(raw_confidence * abs_factor, 4)
 
             hit = Hit(
                 id=doc_id,

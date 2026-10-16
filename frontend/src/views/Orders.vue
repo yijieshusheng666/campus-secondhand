@@ -2,13 +2,20 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { useCurrentUser } from '../composables/useCurrentUser'
 import ReviewDialog from '../components/ReviewDialog.vue'
+import { statusIcon, escrowIcon, actionIcon } from '../icons'
 
 const router = useRouter()
 const orders = ref([])
 const loading = ref(false)
-const user = JSON.parse(localStorage.getItem('user') || 'null')
+const user = useCurrentUser()
+
+const ordersApi = useApiRequest('订单操作失败')
+const disputeApi = useApiRequest('提交失败，请检查后端服务')
+const actionApi = useApiRequest('操作失败，请检查后端服务')
 
 const statusTag = {
   '待付款': 'danger',
@@ -43,10 +50,10 @@ async function loadOrders() {
   if (!user) return
   loading.value = true
   try {
-    const { data } = await request.get('/orders', { params: { userId: user.id, role: 'buyer' } })
+    const { data } = await ordersApi.get('/orders', { params: { userId: user.value.id, role: 'buyer' } })
     orders.value = data
   } catch (e) {
-    ElMessage.error('订单加载失败，请检查后端服务')
+    // useApiRequest 已统一提示
   } finally {
     loading.value = false
   }
@@ -54,7 +61,7 @@ async function loadOrders() {
 
 // 我能对这笔订单做的操作：由后端状态机给出 nextActions，再按身份过滤
 function myActions(order) {
-  const role = order.buyerId === user.id ? 'buyer' : 'seller'
+  const role = order.buyerId === user.value.id ? 'buyer' : 'seller'
   return (order.nextActions || []).filter(a => a.actor === role)
 }
 
@@ -84,9 +91,9 @@ function openDispute(order) {
 async function submitDispute() {
   disputeSubmitting.value = true
   try {
-    const { data } = await request.post('/disputes', {
+    const { data } = await disputeApi.post('/disputes', {
       orderId: disputeOrder.value.id,
-      initiatorId: user.id,
+      initiatorId: user.value.id,
       reason: disputeForm.value.reason,
       detail: disputeForm.value.detail
     })
@@ -99,7 +106,7 @@ async function submitDispute() {
       ElMessage.error(data.message || '提交失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '提交失败，请检查后端服务')
+    // useApiRequest 已统一提示
   } finally {
     disputeSubmitting.value = false
   }
@@ -118,9 +125,9 @@ async function handleAction(order, action) {
     return
   }
   try {
-    const { data } = await request.put(`/orders/${order.id}/status`, {
+    const { data } = await actionApi.put(`/orders/${order.id}/status`, {
       status: action.status,
-      userId: user.id
+      userId: user.value.id
     })
     if (data.success) {
       ElMessage.success(data.message || '操作成功')
@@ -130,7 +137,7 @@ async function handleAction(order, action) {
       ElMessage.error(data.message || '操作失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '操作失败，请检查后端服务')
+    // useApiRequest 已统一提示
   }
 }
 
@@ -144,8 +151,8 @@ async function loadReviewedFlags() {
   for (const order of orders.value) {
     if (order.status !== '已完成') continue
     try {
-      const { data } = await request.get('/reviews/order', {
-        params: { orderId: order.id, reviewerId: user.id }
+      const { data } = await ordersApi.get('/reviews/order', {
+        params: { orderId: order.id, reviewerId: user.value.id }
       })
       if (data.reviewed) flags.add(order.id)
     } catch (e) {
@@ -188,13 +195,17 @@ onMounted(async () => {
           <span class="order-id">订单号：{{ order.id }}</span>
           <div class="order-tags">
             <el-tag size="small" :type="escrowTag[order.escrowStatus] || 'info'">
+              <img  loading="lazy"v-if="escrowIcon(order.escrowStatus)" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
               资金：{{ order.escrowStatus || '—' }}
             </el-tag>
-            <el-tag :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+            <el-tag :type="statusTag[order.status] || 'info'">
+              <img  loading="lazy"v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
+              {{ order.status }}
+            </el-tag>
           </div>
         </div>
         <div class="order-content">
-          <img class="order-img" :src="getImageUrl(order.goodsImage)" alt="商品">
+          <img v-img-fallback  loading="lazy"class="order-img" :src="getImageUrl(order.goodsImage)" alt="商品">
           <div class="order-info">
             <div class="order-title">{{ order.goodsTitle }}</div>
             <div class="order-price">¥{{ order.goodsPrice }}</div>
@@ -211,7 +222,9 @@ onMounted(async () => {
             <el-button v-for="a in myActions(order)" :key="a.status" size="small"
               :type="a.status === '已取消' || a.status === '退款中' ? 'danger' : 'primary'"
               :plain="a.status === '已取消' || a.status === '退款中'"
-              @click="handleAction(order, a)">{{ a.label }}</el-button>
+              @click="handleAction(order, a)">
+              <img  loading="lazy"v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
+            </el-button>
             <span v-if="order.status === '退款中'" class="order-hint">等待卖家处理退款</span>
             <span v-if="order.status === '仲裁中'" class="order-hint">平台处理中，货款已冻结</span>
             <template v-if="order.status === '已完成'">
@@ -225,8 +238,8 @@ onMounted(async () => {
       </el-card>
     </div>
 
-    <!-- B3 评价卖家（共用组件） -->
-    <ReviewDialog v-model="reviewVisible" :order="reviewOrder" :user-id="user.id"
+    <!-- B3 评价卖家（共用组件）：未登录时不渲染，否则 :user-id="user.id" 会在 user 为 null 时抛错 -->
+    <ReviewDialog v-if="user" v-model="reviewVisible" :order="reviewOrder" :user-id="user.id"
       target="卖家" @submitted="onReviewed" />
 
     <!-- B4 申请平台介入 -->
@@ -267,6 +280,23 @@ onMounted(async () => {
 }
 .order-id { font-size: 13px; color: #666; }
 .order-tags { display: flex; align-items: center; gap: 6px; }
+/* 标签 / 按钮里的小图标：统一 15px，靠 baseline 微调对齐文字 */
+.tag-icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  object-fit: cover;
+  vertical-align: -3px;
+  margin-right: 3px;
+}
+.btn-icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  object-fit: cover;
+  vertical-align: -3px;
+  margin-right: 4px;
+}
 .order-hint { font-size: 12px; color: #999; }
 .order-content { display: flex; gap: 14px; }
 .order-img { width: 80px; height: 80px; object-fit: cover; border-radius: 4px; background: #eee; }

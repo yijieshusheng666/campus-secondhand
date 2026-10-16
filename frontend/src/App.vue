@@ -1,9 +1,12 @@
 <script setup>
 import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import request from './api'
 import ChatPanel from './components/ChatPanel.vue'
+import { navIcon, navTint } from './icons'
+import { avatarUrl } from './avatars'
+import { currentUser, patchUser, reloadUser, setUser } from './session'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,7 +20,8 @@ const navs = [
   { path: '/user', label: '个人中心' }
 ]
 
-const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
+// 当前用户来自共享会话对象：个人中心改昵称/换头像后，这里（含右上角头像）会立刻跟着变
+const user = currentUser
 
 // B4：管理端入口只对 role=admin 的账号显示
 const visibleNavs = computed(() => (user.value?.role === 'admin'
@@ -26,14 +30,12 @@ const visibleNavs = computed(() => (user.value?.role === 'admin'
 
 // 兼容改动前登录的老会话：localStorage 里可能没有 role，补查一次并回写
 async function syncUserRole() {
-  const cached = JSON.parse(localStorage.getItem('user') || 'null')
+  const cached = user.value
   if (!cached || cached.role || !cached.id) return
   try {
     const { data } = await request.get(`/users/${cached.id}`)
     if (data?.role) {
-      cached.role = data.role
-      localStorage.setItem('user', JSON.stringify(cached))
-      user.value = cached
+      patchUser({ role: data.role })
     }
   } catch (e) {
     // 查不到就按普通用户处理
@@ -41,16 +43,8 @@ async function syncUserRole() {
 }
 
 // 路由切换时刷新登录状态（登录/退出后界面同步）。
-// 只有真的变了才更新：否则每次切页都会把 user 换成新对象，导致整个头部（含导航）重渲染。
-watch(() => route.path, () => {
-  const cached = JSON.parse(localStorage.getItem('user') || 'null')
-  const changed = (cached?.id ?? null) !== (user.value?.id ?? null)
-    || (cached?.username ?? null) !== (user.value?.username ?? null)
-    || (cached?.role ?? null) !== (user.value?.role ?? null)
-  if (changed) {
-    user.value = cached
-  }
-})
+// reloadUser 内部只在真的变了才替换对象，避免每次切页都把整个头部（含导航）重渲染。
+watch(() => route.path, reloadUser)
 
 // 悬浮智能客服：纯自控面板，不依赖任何 UI 库组件
 const chatVisible = ref(false)
@@ -87,9 +81,18 @@ function onGoHome() {
   router.push('/')
 }
 
-function onLogout() {
-  localStorage.removeItem('user')
-  user.value = null
+// 退出登录先二次确认，避免误点直接把登录态清了
+async function onLogout() {
+  try {
+    await ElMessageBox.confirm('退出后需要重新登录才能发布商品、下单和查看订单。确定退出吗？', '退出登录', {
+      type: 'warning',
+      confirmButtonText: '确定退出',
+      cancelButtonText: '再想想'
+    })
+  } catch {
+    return
+  }
+  setUser(null)
   ElMessage.success('已退出登录')
   router.push('/login')
 }
@@ -100,7 +103,8 @@ function onLogout() {
     <header class="header">
       <div class="header-inner">
         <div class="logo" @click="router.push('/')">
-          <span class="logo-mark">🎓</span>
+          <!-- 品牌 logo（书 + 双向箭头）：public/images/logo.png，原图白底已抠成透明 -->
+          <img class="logo-mark" src="/images/logo.png" alt="校园二手交易平台">
           <div class="logo-text-wrap">
             <span class="logo-text">校园二手交易平台</span>
             <span class="logo-slogan">淘点好物 · 校园面交更放心</span>
@@ -110,13 +114,20 @@ function onLogout() {
         <nav class="nav-links">
           <router-link v-for="n in visibleNavs" :key="n.path" :to="n.path" class="nav-link"
             :class="{ active: route.path === n.path }">
+            <!-- 图标统一走 icons.js；万一某个入口没登记图标，这里就退回纯文字。
+                 「消息」复用了求购的气泡图，用 navTint 给的色相偏移区分成两张图 -->
+            <img v-if="navIcon(n.path)" class="nav-icon" :src="navIcon(n.path)"
+              :style="{ filter: navTint(n.path) || 'none' }" alt="">
             {{ n.label }}
           </router-link>
         </nav>
 
         <div class="user-area">
           <template v-if="user">
-            <el-avatar :size="30" class="avatar">{{ user.username?.charAt(0) }}</el-avatar>
+            <!-- 选过头像就显示头像，没选过 el-avatar 会自动回退到下面的昵称首字 -->
+            <el-avatar :size="30" class="avatar" :src="avatarUrl(user)">
+              {{ user.username?.charAt(0) }}
+            </el-avatar>
             <span class="username">{{ user.username }}</span>
             <el-button link type="danger" @click="onLogout">退出</el-button>
           </template>
@@ -132,7 +143,7 @@ function onLogout() {
     <!-- 悬浮智能客服：传送到 body，彻底脱离页面布局与层叠上下文影响 -->
     <Teleport to="body">
       <button ref="fabRef" class="chat-fab" type="button" data-version="v3" title="智能客服 (v3)">
-        <img src="/images/机器人.png" alt="智能客服">
+        <img class="chat-fab-icon" src="/images/icons/bot.svg" alt="智能客服" />
         <transition name="fade">
           <span v-if="fabTipVisible" class="fab-tip">有问题？问一问</span>
         </transition>
@@ -165,6 +176,18 @@ html, body { margin: 0; padding: 0; }
    文档宽度变化约 15px，整个头部（含导航栏）跟着横向平移，看起来像抖了一下。
    overflow-y: scroll 兜底所有浏览器，scrollbar-gutter 在支持的浏览器上更干净。 */
 html { overflow-y: scroll; scrollbar-gutter: stable; }
+
+/* 打开弹窗时不要横向位移。
+   Element Plus 的 useLockscreen 会给 body 加上 .el-popup-parent--hidden，并把 body 的
+   宽度内联设成 calc(100% - 滚动条宽度)，用来补偿「滚动条被隐藏后多出来的那点宽度」。
+   但本项目 html 本来就常驻滚动条（上一行的 overflow-y: scroll），滚动条并不会消失，
+   这份补偿纯属多余：整页会向左平移约 8px，关闭弹窗 200ms 后再移回来 ——
+   表现就是点「实名认证 / 修改昵称 / 更换头像 / 收货地址管理」这类按钮时界面抖一下。
+   这里把它的内联宽度抵消掉；弹窗遮罩、点击外部关闭等行为都不受影响。 */
+body.el-popup-parent--hidden {
+  width: 100% !important;
+  padding-right: 0 !important;
+}
 body {
   background: #f6f7f9;
   font-family: 'Microsoft YaHei', 'PingFang SC', sans-serif;
@@ -217,16 +240,11 @@ body {
   cursor: pointer;
   flex-shrink: 0;
 }
+/* 品牌 logo：素材已抠成透明底，直接贴在白色头部上，不用外框 */
 .logo-mark {
-  width: 40px;
   height: 40px;
-  background: linear-gradient(135deg, #ffd21e, #ffb800);
-  border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  box-shadow: 0 2px 6px rgba(255, 184, 0, 0.4);
+  width: auto;
+  display: block;
 }
 .logo-text-wrap { display: flex; flex-direction: column; line-height: 1.25; }
 .logo-text { font-size: 16px; font-weight: bold; color: var(--ink-color); white-space: nowrap; }
@@ -241,6 +259,9 @@ body {
   justify-content: center;
 }
 .nav-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 8px 18px;
   font-size: 15px;
   color: #4a4a4a;
@@ -248,6 +269,14 @@ body {
   border-radius: 18px;
   white-space: nowrap;
   transition: background 0.2s, color 0.2s;
+}
+/* 导航图标：素材自带圆角方块底，统一按 20px 显示 */
+.nav-icon {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 .nav-link:hover { background: #fffbea; color: var(--ink-color); }
 .nav-link.active { background: #fff3c2; color: var(--ink-color); font-weight: 700; }

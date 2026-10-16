@@ -2,11 +2,20 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { clearPersonalContext } from '../composables/usePersonalContext'
 import ReviewDialog from '../components/ReviewDialog.vue'
+import { statusIcon, escrowIcon, actionIcon } from '../icons'
+import { AVATARS, avatarUrl } from '../avatars'
+import { currentUser as user, patchUser, setUser } from '../session'
 
 const router = useRouter()
-const user = ref(JSON.parse(localStorage.getItem('user') || 'null'))
+
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const api = useApiRequest('操作失败，请检查后端服务')
+
+// user 来自共享会话对象（见 src/session.js）：这里改了昵称/头像，导航栏会同步更新
 
 // 我的商品
 const myGoods = ref([])
@@ -18,6 +27,11 @@ const sales = ref([])
 // 昵称弹窗
 const nameDialog = ref(false)
 const newName = ref('')
+
+// 头像弹窗（只能在内置的 4 张里选）
+const avatarDialog = ref(false)
+const selectedAvatar = ref('')
+const savingAvatar = ref(false)
 
 // 地址弹窗
 const addrDialog = ref(false)
@@ -35,7 +49,7 @@ const verifying = ref(false)
 async function loadVerifyStatus() {
   if (!user.value) return
   try {
-    const { data } = await request.get(`/users/${user.value.id}`)
+    const { data } = await api.get(`/users/${user.value.id}`)
     verified.value = !!data.verified
     realNameMasked.value = data.realNameMasked || ''
   } catch (e) {
@@ -47,87 +61,10 @@ async function loadVerifyStatus() {
 const credit = ref({ creditScore: 60, avgScore: 0, reviewCount: 0, creditLevel: '新用户' })
 const reviews = ref([])
 
-// C3 我的拼单 / C4 换物请求
-const myGroupBuys = ref([])
-const barterReceived = ref([])
-const barterSent = ref([])
-
-async function loadGroupBuys() {
-  if (!user.value) return
-  try {
-    const { data } = await request.get('/groupbuy', { params: { userId: user.value.id } })
-    myGroupBuys.value = data.data || []
-  } catch (e) {
-    // 拼单加载失败不影响页面其他部分
-  }
-}
-
-async function loadBarters() {
-  if (!user.value) return
-  try {
-    const { data } = await request.get('/barter', { params: { userId: user.value.id } })
-    barterReceived.value = data.received || []
-    barterSent.value = data.sent || []
-  } catch (e) {
-    // 换物请求加载失败不影响页面其他部分
-  }
-}
-
-async function quitGroupBuy(groupBuy) {
-  const isInitiator = groupBuy.initiatorId === user.value.id
-  try {
-    await ElMessageBox.confirm(
-      isInitiator ? '你是发起人，取消后整个拼单就结束了，确定吗？' : '确定退出这个拼单吗？',
-      isInitiator ? '取消拼单' : '退出拼单', { type: 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await request.post(`/groupbuy/${groupBuy.id}/cancel`, { userId: user.value.id })
-    if (data.success) {
-      ElMessage.success(data.message)
-      loadGroupBuys()
-    } else {
-      ElMessage.error(data.message || '操作失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '操作失败')
-  }
-}
-
-async function respondBarter(barter, accept) {
-  try {
-    await ElMessageBox.confirm(
-      accept ? '同意和对方交换吗？同意后你们自行约时间交接。' : '确定拒绝这条换物请求吗？',
-      '回应换物请求', { type: accept ? 'info' : 'warning' })
-  } catch {
-    return
-  }
-  try {
-    const { data } = await request.post(`/barter/${barter.id}/respond`, {
-      userId: user.value.id, accept
-    })
-    if (data.success) {
-      ElMessage.success(data.message)
-      loadBarters()
-    } else {
-      ElMessage.error(data.message || '操作失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '操作失败')
-  }
-}
-
-function barterStatusType(status) {
-  if (status === '已同意') return 'success'
-  if (status === '已拒绝') return 'info'
-  return 'warning'
-}
-
 async function loadReviews() {
   if (!user.value) return
   try {
-    const { data } = await request.get('/reviews', { params: { userId: user.value.id } })
+    const { data } = await api.get('/reviews', { params: { userId: user.value.id } })
     reviews.value = data.data || []
     // 我发出的评价：用来判断某个已完成订单还能不能评价买家
     reviewedOrderIds.value = new Set((data.sent || []).map(r => r.orderId))
@@ -169,7 +106,7 @@ async function submitVerify() {
   }
   verifying.value = true
   try {
-    const { data } = await request.post('/user/verify', { id: user.value.id, realName })
+    const { data } = await api.post('/user/verify', { id: user.value.id, realName })
     if (data.success) {
       verified.value = true
       realNameMasked.value = data.realNameMasked || ''
@@ -179,7 +116,7 @@ async function submitVerify() {
       ElMessage.error(data.message || '认证失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '认证失败，请检查后端服务')
+    // useApiRequest 已统一提示（或当前是 request.* 直调，由后端 message 自动展示）
   } finally {
     verifying.value = false
   }
@@ -205,8 +142,21 @@ function toLogin() {
   if (!user.value) router.push('/login')
 }
 
-function onLogout() {
-  localStorage.removeItem('user')
+async function onLogout() {
+  // 退出后必须清空助手那份个人数据快照，否则下一个登录的人提问时，
+  // 会被当成上一个用户的私有数据一起发给 AI 服务。
+  clearPersonalContext()
+
+  try {
+    await ElMessageBox.confirm('退出后需要重新登录才能发布商品、下单和查看订单。确定退出吗？', '退出登录', {
+      type: 'warning',
+      confirmButtonText: '确定退出',
+      cancelButtonText: '再想想'
+    })
+  } catch {
+    return
+  }
+  setUser(null)
   ElMessage.success('已退出登录')
   router.push('/login')
 }
@@ -224,10 +174,9 @@ async function saveNickname() {
     return
   }
   try {
-    const { data } = await request.post('/user/update', { id: user.value.id, username: newName.value.trim() })
+    const { data } = await api.post('/user/update', { id: user.value.id, username: newName.value.trim() })
     if (data.success) {
-      user.value.username = newName.value.trim()
-      localStorage.setItem('user', JSON.stringify(user.value))
+      patchUser({ username: newName.value.trim() })
       nameDialog.value = false
       ElMessage.success('昵称修改成功')
     } else {
@@ -235,6 +184,36 @@ async function saveNickname() {
     }
   } catch (e) {
     ElMessage.error('网络错误，请检查后端服务')
+  }
+}
+
+// 更换头像：只在内置的 4 张之间选，选中项存到后端 users.avatar，前端写进共享会话对象
+function openAvatarDialog() {
+  if (!user.value) return toLogin()
+  selectedAvatar.value = user.value.avatar || ''
+  avatarDialog.value = true
+}
+
+async function saveAvatar() {
+  if (!selectedAvatar.value) {
+    ElMessage.warning('请先选一张头像')
+    return
+  }
+  savingAvatar.value = true
+  try {
+    const { data } = await api.post('/user/update', { id: user.value.id, avatar: selectedAvatar.value })
+    if (data.success) {
+      // 写进共享会话对象：导航栏右上角、聊天面板里的头像会立刻一起变
+      patchUser({ avatar: selectedAvatar.value })
+      avatarDialog.value = false
+      ElMessage.success('头像已更换')
+    } else {
+      ElMessage.error(data.message || '更换失败')
+    }
+  } catch (e) {
+    // useApiRequest 已统一提示（或当前是 request.* 直调，由后端 message 自动展示）
+  } finally {
+    savingAvatar.value = false
   }
 }
 
@@ -257,7 +236,7 @@ async function deleteGoods(goods) {
     return
   }
   try {
-    const { data } = await request.delete(`/goods/${goods.id}`)
+    const { data } = await api.delete(`/goods/${goods.id}`)
     if (data.success) {
       ElMessage.success('商品删除成功')
       loadMyGoods()
@@ -282,7 +261,7 @@ async function batchDelete() {
   let successCount = 0
   for (const id of selectedIds.value) {
     try {
-      const { data } = await request.delete(`/goods/${id}`)
+      const { data } = await api.delete(`/goods/${id}`)
       if (data.success) successCount++
     } catch { /* 忽略单个失败 */ }
   }
@@ -298,7 +277,7 @@ async function batchDelete() {
 async function loadSales() {
   if (!user.value) return
   try {
-    const { data } = await request.get('/orders', { params: { userId: user.value.id, role: 'seller' } })
+    const { data } = await api.get('/orders', { params: { userId: user.value.id, role: 'seller' } })
     sales.value = data
   } catch (e) {
     ElMessage.error('售出记录加载失败')
@@ -325,7 +304,7 @@ async function handleSaleAction(order, action) {
     return
   }
   try {
-    const { data } = await request.put(`/orders/${order.id}/status`, {
+    const { data } = await api.put(`/orders/${order.id}/status`, {
       status: action.status,
       userId: user.value.id
     })
@@ -336,7 +315,7 @@ async function handleSaleAction(order, action) {
       ElMessage.error(data.message || '操作失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '操作失败，请检查后端服务')
+    // useApiRequest 已统一提示（或当前是 request.* 直调，由后端 message 自动展示）
   }
 }
 
@@ -385,29 +364,45 @@ async function deleteAddr(idx) {
   ElMessage.success('地址已删除')
 }
 
+// 首屏骨架屏的开关。个人中心一进来就并发打 4 个接口（我的商品 / 售出记录 /
+// 实名状态 / 收到的评价），最坏要 500ms 才回。在这之前下面全是空的，
+// 用户看到的就是「只有头像和名字、底下光秃秃一片」，然后内容整块弹出来。
+// 用骨架块填掉这段空窗，高度贴近真实卡片，数据到位后原地替换不产生跳动。
+const ready = ref(false)
+
 onMounted(() => {
-  loadMyGoods()
-  loadSales()
-  loadVerifyStatus()
-  loadReviews()
-  loadGroupBuys()
-  loadBarters()
+  // allSettled 而不是 all：任意一个接口挂了都不该让整页永远卡在骨架屏上
+  Promise.allSettled([
+    loadMyGoods(),
+    loadSales(),
+    loadVerifyStatus(),
+    loadReviews()
+  ]).finally(() => { ready.value = true })
 })
 </script>
 
 <template>
   <div class="user-page">
-    <div v-if="!user" class="empty-wrap">
-      <el-empty description="未登录">
-        <el-button type="primary" @click="router.push('/login')">去登录</el-button>
-      </el-empty>
+    <!-- 未登录也能进个人中心：给一张明确的提示卡，而不是空白或报错 -->
+    <div v-if="!user" class="guest-card">
+      <img class="guest-logo" src="/images/logo.png" alt="校园二手交易平台">
+      <h3 class="guest-title">未登录</h3>
+      <p class="guest-hint">
+        你还没有登录，登录后才能发布闲置、管理商品、查看订单和信用分。<br>
+        新同学用学号注册即可，全程免费。
+      </p>
+      <el-button type="primary" round size="large" @click="router.push('/login')">
+        去登录 / 注册
+      </el-button>
     </div>
 
     <div v-else>
       <!-- 用户信息 -->
       <el-card class="user-card" shadow="never">
         <div class="user-info" @click="toLogin">
-          <el-avatar :size="72" class="user-avatar">{{ user.username?.charAt(0) }}</el-avatar>
+          <el-avatar :size="72" class="user-avatar" :src="avatarUrl(user)">
+            {{ user.username?.charAt(0) }}
+          </el-avatar>
           <h3>
             {{ user.username }}
             <el-tag v-if="verified" size="small" type="success" class="verify-tag">✅ 已实名</el-tag>
@@ -421,10 +416,20 @@ onMounted(() => {
             {{ verified ? '查看实名认证' : '实名认证' }}
           </el-button>
           <el-button @click="openNameDialog">修改昵称</el-button>
+          <el-button @click="openAvatarDialog">更换头像</el-button>
           <el-button @click="openAddrDialog">收货地址管理</el-button>
           <el-button type="danger" plain @click="onLogout">退出登录</el-button>
         </div>
       </el-card>
+
+      <!-- 首屏空窗：骨架块高度贴近真实卡片，数据到位后原地替换 -->
+      <div v-if="!ready" class="user-skeleton">
+        <el-card v-for="n in 3" :key="n" class="section-card" shadow="never">
+          <el-skeleton :rows="n === 1 ? 2 : 3" animated />
+        </el-card>
+      </div>
+
+      <template v-else>
 
       <!-- B3 信用分与收到的评价 -->
       <el-card class="section-card" shadow="never">
@@ -455,65 +460,6 @@ onMounted(() => {
         </div>
       </el-card>
 
-      <!-- C3 我的拼单 -->
-      <el-card v-if="myGroupBuys.length" class="section-card" shadow="never">
-        <div class="section-header"><h3>我的拼单</h3></div>
-        <div v-for="gb in myGroupBuys" :key="gb.id" class="gb-row">
-          <div class="gb-row-head">
-            <span class="gb-row-title">{{ gb.goodsTitle }}</span>
-            <el-tag size="small" :type="gb.status === '拼单中' ? 'warning' : 'success'">{{ gb.status }}</el-tag>
-          </div>
-          <div class="gb-row-meta">
-            🏢 {{ gb.building }} · 已参与 {{ gb.joinedCount }}/{{ gb.targetCount }} 人
-            · 发起人 {{ gb.initiatorName }}
-          </div>
-          <div class="gb-row-members">成员：{{ gb.members.map(m => m.name).join('、') }}</div>
-          <el-button v-if="gb.status === '拼单中'" size="small" @click="quitGroupBuy(gb)">
-            {{ gb.initiatorId === user.id ? '取消拼单' : '退出拼单' }}
-          </el-button>
-        </div>
-      </el-card>
-
-      <!-- C4 换物请求 -->
-      <el-card class="section-card" shadow="never">
-        <div class="section-header">
-          <h3>换物请求</h3>
-          <span class="section-hint">别人想用东西换你的宝贝，或你想换别人的</span>
-        </div>
-        <el-empty v-if="barterReceived.length === 0 && barterSent.length === 0"
-          description="还没有换物请求" :image-size="60" />
-
-        <template v-if="barterReceived.length">
-          <div class="barter-sub">收到的（{{ barterReceived.length }}）</div>
-          <div v-for="b in barterReceived" :key="'r' + b.id" class="barter-row">
-            <div class="barter-head">
-              <span class="barter-title">
-                <b>{{ b.requesterName }}</b> 想用「{{ b.offerTitle }}」换你的「{{ b.goodsTitle }}」
-              </span>
-              <el-tag size="small" :type="barterStatusType(b.status)">{{ b.status }}</el-tag>
-            </div>
-            <div class="barter-desc" v-if="b.offerDesc">{{ b.offerDesc }}</div>
-            <div class="barter-actions" v-if="b.status === '待回应'">
-              <el-button size="small" type="primary" @click="respondBarter(b, true)">同意换物</el-button>
-              <el-button size="small" @click="respondBarter(b, false)">拒绝</el-button>
-            </div>
-          </div>
-        </template>
-
-        <template v-if="barterSent.length">
-          <div class="barter-sub">我发出的（{{ barterSent.length }}）</div>
-          <div v-for="b in barterSent" :key="'s' + b.id" class="barter-row">
-            <div class="barter-head">
-              <span class="barter-title">
-                我想用「{{ b.offerTitle }}」换「{{ b.goodsTitle }}」
-              </span>
-              <el-tag size="small" :type="barterStatusType(b.status)">{{ b.status }}</el-tag>
-            </div>
-            <div class="barter-desc" v-if="b.offerDesc">{{ b.offerDesc }}</div>
-          </div>
-        </template>
-      </el-card>
-
       <!-- 我的商品 -->
       <el-card class="section-card" shadow="never">
         <div class="section-header">
@@ -542,8 +488,14 @@ onMounted(() => {
           <div class="sale-header">
             <span class="sale-buyer">买家：{{ order.buyerName }}</span>
             <div class="sale-tags">
-              <el-tag size="small" type="warning">资金：{{ order.escrowStatus || '—' }}</el-tag>
-              <el-tag size="small" :type="statusTag[order.status] || 'info'">{{ order.status }}</el-tag>
+              <el-tag size="small" type="warning">
+                <img  loading="lazy"v-if="escrowIcon(order.escrowStatus)" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
+                资金：{{ order.escrowStatus || '—' }}
+              </el-tag>
+              <el-tag size="small" :type="statusTag[order.status] || 'info'">
+                <img  loading="lazy"v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
+                {{ order.status }}
+              </el-tag>
             </div>
           </div>
           <div class="sale-line">商品：{{ order.goodsTitle }}</div>
@@ -557,12 +509,34 @@ onMounted(() => {
               @click="openSaleReview(order)">评价买家</el-button>
             <el-button v-for="a in sellerActions(order)" :key="a.status" size="small"
               :type="a.status === '已退款' ? 'danger' : 'primary'" :plain="a.status === '已退款'"
-              @click="handleSaleAction(order, a)">{{ a.label }}</el-button>
+              @click="handleSaleAction(order, a)">
+              <img  loading="lazy"v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
+            </el-button>
           </div>
         </div>
       </el-card>
+    </template>
     </div>
   </div>
+
+  <!-- 下面这些弹窗都跟「当前登录用户」有关：未登录时整个不渲染，
+       否则 :user-id="user.id" 这类绑定会在 user 为 null 时直接抛错 -->
+  <template v-if="user">
+  <!-- 头像弹窗：只给内置的 4 张，点一下即选中 -->
+  <el-dialog v-model="avatarDialog" title="更换头像" width="400px">
+    <div class="avatar-picker">
+      <div v-for="a in AVATARS" :key="a.key" class="avatar-option"
+        :class="{ active: selectedAvatar === a.key }" :title="a.name" @click="selectedAvatar = a.key">
+        <img  loading="lazy" :src="a.url" :alt="a.name">
+        <span class="avatar-name">{{ a.name }}</span>
+      </div>
+    </div>
+    <p class="avatar-note">头像只能从上面这几张里选，保存后全站（导航、聊天、个人中心）都会同步。</p>
+    <template #footer>
+      <el-button @click="avatarDialog = false">取消</el-button>
+      <el-button type="primary" :loading="savingAvatar" @click="saveAvatar">保存</el-button>
+    </template>
+  </el-dialog>
 
   <!-- 昵称弹窗 -->
   <el-dialog v-model="nameDialog" title="修改昵称" width="360px">
@@ -618,11 +592,18 @@ onMounted(() => {
   <!-- B3 评价买家：与 Orders.vue 共用同一个 ReviewDialog 组件 -->
   <ReviewDialog v-model="saleReviewVisible" :order="saleReviewOrder" :user-id="user.id"
     target="买家" @submitted="onSaleReviewed" />
+  </template>
 </template>
 
 <style scoped>
 .user-page { max-width: 800px; margin: 0 auto; }
-.empty-wrap { background: #fff; border-radius: 8px; padding: 40px; }
+/* 首屏骨架：只在数据回来前出现，占位高度贴近真实卡片 */
+.user-skeleton .section-card :deep(.el-skeleton__item) { border-radius: 6px; }
+/* 未登录提示卡 */
+.guest-card { background: #fff; border-radius: 12px; padding: 48px 24px; text-align: center; }
+.guest-logo { height: 56px; width: auto; display: block; margin: 0 auto 14px; }
+.guest-title { font-size: 18px; color: var(--ink-color); margin: 0 0 8px; }
+.guest-hint { font-size: 13px; color: #999; line-height: 1.8; margin: 0 0 22px; }
 .user-card { margin-bottom: 16px; }
 .verify-tag { margin-left: 8px; vertical-align: middle; }
 .verify-body { font-size: 13px; }
@@ -645,19 +626,43 @@ onMounted(() => {
 .review-sub { font-size: 11px; color: #bbb; }
 .sale-tags { display: flex; align-items: center; gap: 6px; }
 
-/* C3 我的拼单 / C4 换物请求 */
-.gb-row { padding: 10px 0; border-top: 1px solid #f0f0f0; }
-.gb-row-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.gb-row-title { font-size: 13px; font-weight: 600; color: var(--ink-color); }
-.gb-row-meta { font-size: 12px; color: #888; margin: 5px 0 3px; }
-.gb-row-members { font-size: 12px; color: #aaa; margin-bottom: 8px; }
+/* 头像选盘：4 张内置头像，选中项描边高亮 */
+.avatar-picker { display: flex; gap: 14px; justify-content: center; }
+.avatar-option {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 2px solid transparent;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.avatar-option:hover { background: #fffbea; }
+.avatar-option.active { border-color: var(--el-color-primary-dark-2); background: #fffbea; }
+.avatar-option img { width: 56px; height: 56px; border-radius: 50%; display: block; }
+.avatar-name { font-size: 12px; color: #666; }
+.avatar-note { font-size: 12px; color: #bbb; text-align: center; margin: 12px 0 0; line-height: 1.6; }
+/* 标签 / 按钮里的小图标（与订单页保持一致） */
+.tag-icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  object-fit: cover;
+  vertical-align: -3px;
+  margin-right: 3px;
+}
+.btn-icon {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  object-fit: cover;
+  vertical-align: -3px;
+  margin-right: 4px;
+}
+
 .section-hint { font-size: 12px; color: #bbb; }
-.barter-sub { font-size: 12px; color: #999; margin: 10px 0 4px; }
-.barter-row { padding: 10px 0; border-top: 1px solid #f0f0f0; }
-.barter-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
-.barter-title { font-size: 13px; color: #555; line-height: 1.6; }
-.barter-desc { font-size: 12px; color: #999; margin: 6px 0; line-height: 1.6; }
-.barter-actions { display: flex; gap: 8px; }
 .user-info { text-align: center; cursor: default; }
 .user-avatar { background: #ffd21e; color: #23201a; font-size: 28px; font-weight: 600; margin-bottom: 8px; }
 .stuid { color: #999; font-size: 13px; margin-top: 4px; }

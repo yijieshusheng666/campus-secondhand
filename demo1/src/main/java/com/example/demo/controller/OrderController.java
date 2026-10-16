@@ -23,6 +23,8 @@ import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.OrderRepository;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.OrderStateMachine;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 @RestController
 @RequestMapping("/api/orders")
@@ -40,23 +42,24 @@ public class OrderController {
     // 创建订单：保存订单快照并把商品标记为已售
     @PostMapping
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long goodsId = Long.valueOf(body.get("goodsId").toString());
-        Long buyerId = Long.valueOf(body.get("buyerId").toString());
-        String receiver = (String) body.get("receiver");
-        String phone = (String) body.get("phone");
-        String address = (String) body.get("address");
-
-        if (receiver == null || phone == null || address == null
-                || receiver.isBlank() || phone.isBlank() || address.isBlank()) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "请填写收货人、联系电话和地址"));
+        Long goodsId = RequestUtils.longOf(body, "goodsId");
+        Long buyerId = RequestUtils.longOf(body, "buyerId");
+        if (goodsId == null || buyerId == null) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少商品或买家标识"));
+        }
+        String receiver = RequestUtils.textOf(body, "receiver");
+        String phone = RequestUtils.textOf(body, "phone");
+        String address = RequestUtils.textOf(body, "address");
+        if (receiver.isEmpty() || phone.isEmpty() || address.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请填写收货人、联系电话和地址"));
         }
 
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "商品不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
         }
         if ("已售".equals(goods.getStatus())) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "商品已售出"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品已售出"));
         }
 
         Order order = new Order();
@@ -76,13 +79,12 @@ public class OrderController {
         goods.setStatus("已售");
         goodsRepository.save(goods);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("orderId", order.getId());
-        result.put("status", order.getStatus());
-        result.put("escrowStatus", order.getEscrowStatus());
-        result.put("message", "下单成功，请完成付款，货款将由平台托管");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("orderId", order.getId());
+        extras.put("status", order.getStatus());
+        extras.put("escrowStatus", order.getEscrowStatus());
+        return ResponseEntity.ok(ApiResponses.ok(
+                "下单成功，请完成付款，货款将由平台托管", extras));
     }
 
     // 查询订单：role=buyer 我买到的，role=seller 我卖出的
@@ -106,31 +108,31 @@ public class OrderController {
             return ResponseEntity.notFound().build();
         }
 
-        String target = text(body, "status");
-        if (target.isBlank()) {
-            return ResponseEntity.badRequest().body(fail("订单状态不能为空"));
+        String target = RequestUtils.textOf(body, "status");
+        if (target.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("订单状态不能为空"));
         }
         if (!OrderStateMachine.isKnown(target)) {
-            return ResponseEntity.badRequest().body(fail("未知的订单状态：" + target));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("未知的订单状态：" + target));
         }
 
         String current = order.getStatus() == null ? OrderStateMachine.PENDING_PAY : order.getStatus();
         if (!OrderStateMachine.canTransfer(current, target)) {
-            return ResponseEntity.badRequest().body(fail(
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
                     "不能从「" + current + "」直接变成「" + target + "」。"
                             + OrderStateMachine.describeNext(current)));
         }
 
-        Long actorId = longOf(body, "userId");
+        Long actorId = RequestUtils.longOf(body, "userId");
         if (actorId == null) {
-            return ResponseEntity.badRequest().body(fail("缺少操作人 userId"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少操作人 userId"));
         }
         String required = OrderStateMachine.actorOf(current, target);
         if (OrderStateMachine.ACTOR_BUYER.equals(required) && !actorId.equals(order.getBuyerId())) {
-            return ResponseEntity.badRequest().body(fail("该操作只能由买家发起"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("该操作只能由买家发起"));
         }
         if (OrderStateMachine.ACTOR_SELLER.equals(required) && !actorId.equals(order.getSellerId())) {
-            return ResponseEntity.badRequest().body(fail("该操作只能由卖家发起"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("该操作只能由卖家发起"));
         }
 
         order.setStatus(target);
@@ -154,35 +156,10 @@ public class OrderController {
             });
         }
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("message", "订单状态已更新为「" + target + "」");
-        result.put("status", target);
-        result.put("escrowStatus", order.getEscrowStatus());
-        return ResponseEntity.ok(result);
-    }
-
-    private String text(Map<String, Object> body, String key) {
-        Object value = body == null ? null : body.get(key);
-        return value == null ? "" : value.toString().trim();
-    }
-
-    private Long longOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("status", target);
+        extras.put("escrowStatus", order.getEscrowStatus());
+        return ResponseEntity.ok(ApiResponses.ok(
+                "订单状态已更新为「" + target + "」", extras));
     }
 }

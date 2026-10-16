@@ -2,11 +2,16 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import request from '../api'
+import { useApiRequest } from '../composables/useApiRequest'
+import { useCurrentUser } from '../composables/useCurrentUser'
 import SectionTabs from '../components/SectionTabs.vue'
 
 const router = useRouter()
-const user = JSON.parse(localStorage.getItem('user') || 'null')
+const user = useCurrentUser()
+
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const squareApi = useApiRequest('求购广场加载失败，请重试')
+const matchApi = useApiRequest('匹配失败，请重试')
 
 const openList = ref([])
 const loading = ref(false)
@@ -28,10 +33,10 @@ async function loadSquare() {
   loading.value = true
   try {
     // 广场展示所有进行中的求购，自己发的也保留（并打标）
-    const { data } = await request.get('/wanted/open')
+    const { data } = await squareApi.get('/wanted/open')
     openList.value = data.data || []
-  } catch (e) {
-    ElMessage.error('求购广场加载失败，请检查后端服务')
+  } catch {
+    // useApiRequest 已统一提示过网络/HTTP 错误
   } finally {
     loading.value = false
   }
@@ -40,7 +45,7 @@ async function loadSquare() {
 async function findMatches(wanted) {
   loadingMatch.value = wanted.id
   try {
-    const { data } = await request.get(`/wanted/${wanted.id}/matches`)
+    const { data } = await matchApi.get(`/wanted/${wanted.id}/matches`)
     matches.value = { ...matches.value, [wanted.id]: data.data || [] }
     const reasons = {}
     for (const info of data.matchInfo || []) {
@@ -53,8 +58,8 @@ async function findMatches(wanted) {
     if (!data.data?.length) {
       ElMessage.info(`已比对站上 ${data.scanned} 件商品，暂时没有能买的匹配项`)
     }
-  } catch (e) {
-    ElMessage.error('匹配失败，请检查后端服务')
+  } catch {
+    // 同上
   } finally {
     loadingMatch.value = 0
   }
@@ -114,7 +119,7 @@ onMounted(loadSquare)
         <div v-if="matches[w.id]" class="goods-grid">
           <el-empty v-if="matches[w.id].length === 0" description="目前没有匹配且在售的商品" :image-size="60" />
           <div v-for="g in matches[w.id]" :key="g.id" class="goods-card">
-            <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
+            <img v-img-fallback  loading="lazy" :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
             <div v-if="matchMeta[w.id]?.reasons?.[g.id]" class="gc-reason">

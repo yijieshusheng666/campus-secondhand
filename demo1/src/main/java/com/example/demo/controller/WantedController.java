@@ -1,6 +1,5 @@
 package com.example.demo.controller;
 
-import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -25,6 +24,8 @@ import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.repository.WantedRepository;
 import com.example.demo.service.WantedMatchService;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 /**
  * 求购反向撮合（C1）：发布需求后由系统反向去找在售商品。
@@ -52,50 +53,51 @@ public class WantedController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long userId = longOf(body, "userId");
+        Long userId = RequestUtils.longOf(body, "userId");
         if (userId == null) {
-            return ResponseEntity.badRequest().body(fail("请先登录"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
-        String title = text(body, "title");
+        String title = RequestUtils.textOf(body, "title");
         if (title.isEmpty()) {
-            return ResponseEntity.badRequest().body(fail("请填写想求购什么"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请填写想求购什么"));
         }
         if (title.length() > MAX_TITLE) {
-            return ResponseEntity.badRequest().body(fail("求购标题不能超过 " + MAX_TITLE + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "求购标题不能超过 " + MAX_TITLE + " 字"));
         }
-        String description = text(body, "description");
+        String description = RequestUtils.textOf(body, "description");
         if (description.length() > MAX_DESC) {
-            return ResponseEntity.badRequest().body(fail("补充说明不能超过 " + MAX_DESC + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "补充说明不能超过 " + MAX_DESC + " 字"));
         }
 
         User user = userRepository.findById(userId).orElse(null);
         if (user == null) {
-            return ResponseEntity.badRequest().body(fail("用户不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("用户不存在"));
         }
 
         Wanted wanted = new Wanted();
         wanted.setUserId(userId);
         wanted.setUserName(user.getUsername());
         wanted.setTitle(title);
-        wanted.setCategory(text(body, "category"));
-        wanted.setMaxPrice(decimalOf(body, "maxPrice"));
+        wanted.setCategory(RequestUtils.textOf(body, "category"));
+        wanted.setMaxPrice(RequestUtils.decimalOf(body, "maxPrice"));
         wanted.setDescription(description);
         wantedRepository.save(wanted);
 
         WantedMatchService.MatchResult matched = matchService.matchGoods(wanted, 6);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("wantedId", wanted.getId());
-        result.put("message", matched.getGoods().isEmpty()
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("wantedId", wanted.getId());
+        extras.put("matches", matched.getGoods());
+        extras.put("matchInfo", matched.getMatchInfo());
+        extras.put("scanned", matched.getScanned());
+        extras.put("semanticCount", matched.getSemanticCount());
+        String msg = matched.getGoods().isEmpty()
                 ? "求购已发布，比对完 " + matched.getScanned() + " 件商品，暂时没有匹配的"
                 : "求购已发布，比对 " + matched.getScanned() + " 件商品，找到 "
-                        + matched.getGoods().size() + " 件匹配的");
-        result.put("matches", matched.getGoods());
-        result.put("matchInfo", matched.getMatchInfo());
-        result.put("scanned", matched.getScanned());
-        result.put("semanticCount", matched.getSemanticCount());
-        return ResponseEntity.ok(result);
+                        + matched.getGoods().size() + " 件匹配的";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     // 我的求购
@@ -103,12 +105,11 @@ public class WantedController {
     public ResponseEntity<?> mine(@RequestParam Long userId) {
         List<Map<String, Object>> items = new ArrayList<>();
         for (Wanted wanted : wantedRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
-            items.add(view(wanted, false));
+            items.add(view(wanted));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", items);
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", items);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 求购广场：所有进行中的需求
@@ -116,12 +117,11 @@ public class WantedController {
     public ResponseEntity<?> open() {
         List<Map<String, Object>> items = new ArrayList<>();
         for (Wanted wanted : wantedRepository.findByStatusOrderByCreatedAtDesc(Wanted.STATUS_OPEN)) {
-            items.add(view(wanted, false));
+            items.add(view(wanted));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", items);
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", items);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 某条求购匹配到的在售商品（附「凭什么匹配」的说明，便于核对）
@@ -129,17 +129,16 @@ public class WantedController {
     public ResponseEntity<?> matches(@PathVariable Long id) {
         Wanted wanted = wantedRepository.findById(id).orElse(null);
         if (wanted == null) {
-            return ResponseEntity.badRequest().body(fail("求购不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("求购不存在"));
         }
         WantedMatchService.MatchResult matched = matchService.matchGoods(wanted, 6);
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", matched.getGoods());
-        result.put("matchInfo", matched.getMatchInfo());
-        result.put("scanned", matched.getScanned());
-        result.put("semanticCount", matched.getSemanticCount());
-        result.put("wanted", view(wanted, false));
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", matched.getGoods());
+        extras.put("matchInfo", matched.getMatchInfo());
+        extras.put("scanned", matched.getScanned());
+        extras.put("semanticCount", matched.getSemanticCount());
+        extras.put("wanted", view(wanted));
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 关闭求购（只有本人可以关）
@@ -148,23 +147,19 @@ public class WantedController {
     public ResponseEntity<?> close(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         Wanted wanted = wantedRepository.findById(id).orElse(null);
         if (wanted == null) {
-            return ResponseEntity.badRequest().body(fail("求购不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("求购不存在"));
         }
-        Long userId = longOf(body, "userId");
+        Long userId = RequestUtils.longOf(body, "userId");
         if (userId == null || !userId.equals(wanted.getUserId())) {
-            return ResponseEntity.badRequest().body(fail("只能关闭自己发布的求购"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("只能关闭自己发布的求购"));
         }
         if (Wanted.STATUS_CLOSED.equals(wanted.getStatus())) {
-            return ResponseEntity.ok(Map.of("success", true, "message", "该求购已经关闭"));
+            return ResponseEntity.ok(ApiResponses.ok("该求购已经关闭"));
         }
         wanted.setStatus(Wanted.STATUS_CLOSED);
         wanted.setClosedAt(LocalDateTime.now());
         wantedRepository.save(wanted);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("message", "求购已关闭");
-        return ResponseEntity.ok(result);
+        return ResponseEntity.ok(ApiResponses.ok("求购已关闭"));
     }
 
     // 这件商品能命中哪些进行中的求购（发布商品成功后即时提示）
@@ -172,20 +167,19 @@ public class WantedController {
     public ResponseEntity<?> matchForGoods(@RequestParam Long goodsId) {
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
-            return ResponseEntity.badRequest().body(fail("商品不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
         }
         List<Map<String, Object>> items = new ArrayList<>();
         for (Wanted wanted : matchService.matchWanted(goods,
                 wantedRepository.findByStatusOrderByCreatedAtDesc(Wanted.STATUS_OPEN))) {
-            items.add(view(wanted, false));
+            items.add(view(wanted));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", items);
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", items);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
-    private Map<String, Object> view(Wanted wanted, boolean withMatches) {
+    private Map<String, Object> view(Wanted wanted) {
         Map<String, Object> item = new LinkedHashMap<>();
         item.put("id", wanted.getId());
         item.put("userId", wanted.getUserId());
@@ -197,41 +191,5 @@ public class WantedController {
         item.put("status", wanted.getStatus());
         item.put("createdAt", wanted.getCreatedAt());
         return item;
-    }
-
-    private String text(Map<String, Object> body, String key) {
-        Object value = body == null ? null : body.get(key);
-        return value == null ? "" : value.toString().trim();
-    }
-
-    private Long longOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private BigDecimal decimalOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return new BigDecimal(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
     }
 }

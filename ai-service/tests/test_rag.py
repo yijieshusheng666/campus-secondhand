@@ -5,8 +5,76 @@
 """
 
 from app.bm25 import BM25Index, tokenize
+from app.config import settings
 from app.lexicon import build_query_variants, normalize, strip_noise
-from app.retrieval import rrf_fuse
+from app.retrieval import _is_followup, rrf_fuse, vector_confidence
+
+
+# ---------------- 向量模式的置信度标定（2026-10-14 实测数据固化）----------------
+
+
+def test_vector_confidence_separates_in_and_out_of_kb():
+    """向量模式必须用绝对余弦：库内问题要过拒答线，库外问题要被拒答。
+
+    (最高余弦, 最高BM25分) 取自 2026-10-14 用 bge-small-zh-v1.5 + 65 条知识库的实测：
+    库内 0.636~0.850、库外 0.319~0.502。这条测试是那次标定的回归保护 ——
+    一旦有人把置信度改回「相对本查询最高分」归一，下面第一组会掉到阈值以下、
+    第二组会顶到阈值以上，测试立刻失败。
+    """
+    in_kb = [(0.757, 3.146), (0.761, 10.077), (0.772, 4.402), (0.773, 6.935), (0.850, 9.914),
+             (0.824, 5.558), (0.778, 7.696), (0.636, 9.793), (0.670, 3.795), (0.809, 3.915)]
+    out_kb = [(0.502, 3.174), (0.419, 0.0), (0.319, 0.0), (0.437, 0.0), (0.323, 3.386),
+              (0.342, 0.0), (0.338, 0.0), (0.423, 0.0)]
+
+    lowest_in = min(vector_confidence(v, b) for v, b in in_kb)
+    highest_out = max(vector_confidence(v, b) for v, b in out_kb)
+    assert lowest_in > settings.refuse_threshold, f"库内问题被误杀：{lowest_in}"
+    assert highest_out < settings.refuse_threshold, f"库外问题没被拒答：{highest_out}"
+    # 两类之间要留出可观的间隔，不能靠刚好压线
+    assert lowest_in - highest_out > 0.2, f"区分度不足：{lowest_in} vs {highest_out}"
+
+
+def test_vector_confidence_monotonic():
+    """余弦越高置信度越高；纯 BM25 强命中只能小幅加分，不能单独把分数顶穿拒答线。"""
+    assert vector_confidence(0.80, 0) > vector_confidence(0.60, 0) > vector_confidence(0.40, 0)
+    assert vector_confidence(0.40, 100) < 0.5, "关键词命中不该把明显不相关的答案拉过线"
+
+
+# ---------------- 多轮上下文：追问判定与查询改写 ----------------
+
+
+def test_followup_detection():
+    """短问句或带指代的说法才算追问，自足的问题不能被上一轮污染。"""
+    assert _is_followup("那大英呢")
+    assert _is_followup("它多少钱")
+    assert _is_followup("还有别的吗")
+    assert not _is_followup("怎么申请退款")
+    assert not _is_followup("宿舍楼拼单怎么发起")
+
+
+def test_context_terms_only_take_user_turns():
+    """上一轮的助手回答不能并进检索查询：整段回答会把关键词稀释掉。"""
+    prep = build_query_variants("那大英呢", history=[
+        {"role": "user", "content": "线代教材多少钱"},
+        {"role": "assistant", "content": "参考区间 20-45 元，带笔记的可以略高一点。"},
+    ])
+    joined = " ".join(prep["context_terms"])
+    assert "线代教材" in joined
+    assert "参考区间" not in joined and "带笔记" not in joined
+
+
+def test_short_followup_query_merges_previous_topic(client):
+    """追问要真的在检索里带上上一轮话题词（trace.queries 可见）。"""
+    body = client.post("/ai/chat", json={
+        "question": "那大英呢",
+        "history": [{"role": "user", "content": "线代教材多少钱"},
+                    {"role": "assistant", "content": "20-45 元"}],
+    }).json()
+    assert body["answer"]
+    # 命中来源要么来自教材价格类条目，要么明确拒答，不能是随机命中
+    if not body["refused"]:
+        titles = [s["title"] for s in body["sources"]]
+        assert any("教材" in t or "价格" in t for t in titles)
 
 
 # ---------------- 查询预处理 ----------------

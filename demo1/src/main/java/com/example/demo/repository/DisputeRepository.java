@@ -8,8 +8,10 @@ import com.example.demo.entity.Dispute;
 
 public interface DisputeRepository extends JpaRepository<Dispute, Long> {
 
-    List<Dispute> findByStatusOrderByCreatedAtAsc(String status);
+    /** 待处理纠纷：按提交时间倒序（最新提交优先处理）。 */
+    List<Dispute> findByStatusOrderByCreatedAtDesc(String status);
 
+    /** 历史已裁定纠纷：按裁定时间倒序（最近结果先看到）。 */
     List<Dispute> findByStatusOrderByHandledAtDesc(String status);
 
     List<Dispute> findByInitiatorIdOrRespondentIdOrderByCreatedAtDesc(Long initiatorId, Long respondentId);

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import request from '../api'
+import { useApiRequest } from '../composables/useApiRequest'
 
 /**
  * 评价弹窗（双向共用）。
@@ -14,6 +14,8 @@ const props = defineProps({
   target: { type: String, default: '卖家' }   // '卖家' 或 '买家'
 })
 const emit = defineEmits(['update:modelValue', 'submitted'])
+
+const reviewApi = useApiRequest('评价失败，请检查后端服务')
 
 const form = ref({ score: 5, content: '' })
 const submitting = ref(false)
@@ -33,7 +35,7 @@ async function submit() {
   }
   submitting.value = true
   try {
-    const { data } = await request.post('/reviews', {
+    const { data } = await reviewApi.post('/reviews', {
       orderId: props.order?.id,
       reviewerId: props.userId,
       score: form.value.score,
@@ -46,8 +48,8 @@ async function submit() {
     } else {
       ElMessage.error(data.message || '评价失败')
     }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '评价失败，请检查后端服务')
+  } catch {
+    // useApiRequest 已统一提示过网络/HTTP 错误
   } finally {
     submitting.value = false
   }

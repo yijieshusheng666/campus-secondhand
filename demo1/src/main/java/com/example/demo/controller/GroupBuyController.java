@@ -23,6 +23,8 @@ import com.example.demo.entity.User;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.GroupBuyRepository;
 import com.example.demo.repository.UserRepository;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 /**
  * 宿舍楼拼单（C3）。同一栋楼的同学凑人数，人满自动成团。
@@ -48,26 +50,26 @@ public class GroupBuyController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long goodsId = longOf(body, "goodsId");
-        Long initiatorId = longOf(body, "initiatorId");
+        Long goodsId = RequestUtils.longOf(body, "goodsId");
+        Long initiatorId = RequestUtils.longOf(body, "initiatorId");
         if (goodsId == null || initiatorId == null) {
-            return ResponseEntity.badRequest().body(fail("请先登录"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
-        String building = text(body, "building");
+        String building = RequestUtils.textOf(body, "building");
         if (building.isEmpty()) {
-            return ResponseEntity.badRequest().body(fail("请选择或填写你所在的宿舍楼"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请选择或填写你所在的宿舍楼"));
         }
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
-            return ResponseEntity.badRequest().body(fail("商品不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
         }
         if ("已售".equals(goods.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("这件宝贝已经售出，没法拼单了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这件宝贝已经售出，没法拼单了"));
         }
 
-        Integer target = intOf(body, "targetCount");
+        Integer target = RequestUtils.intOf(body, "targetCount");
         if (target == null || target < MIN_TARGET || target > MAX_TARGET) {
-            return ResponseEntity.badRequest().body(fail(
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
                     "成团人数需要在 " + MIN_TARGET + "-" + MAX_TARGET + " 人之间"));
         }
 
@@ -82,12 +84,10 @@ public class GroupBuyController {
         groupBuy.getMemberIds().add(initiatorId);
         groupBuyRepository.save(groupBuy);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("groupBuyId", groupBuy.getId());
-        result.put("message", "拼单已发起（" + building + "），还差 "
-                + (target - 1) + " 人成团");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("groupBuyId", groupBuy.getId());
+        String msg = "拼单已发起（" + building + "），还差 " + (target - 1) + " 人成团";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     // 某件商品进行中的拼单
@@ -98,10 +98,9 @@ public class GroupBuyController {
                 goodsId, GroupBuy.STATUS_OPEN)) {
             items.add(view(groupBuy));
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", items);
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", items);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 我发起或参与的拼单
@@ -118,10 +117,9 @@ public class GroupBuyController {
                 items.add(view(groupBuy));
             }
         }
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("data", items);
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("data", items);
+        return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
     // 加入拼单：必须同楼、不能重复、不能加入已结束的
@@ -130,24 +128,25 @@ public class GroupBuyController {
     public ResponseEntity<?> join(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         GroupBuy groupBuy = groupBuyRepository.findById(id).orElse(null);
         if (groupBuy == null) {
-            return ResponseEntity.badRequest().body(fail("拼单不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("拼单不存在"));
         }
-        Long userId = longOf(body, "userId");
+        Long userId = RequestUtils.longOf(body, "userId");
         if (userId == null) {
-            return ResponseEntity.badRequest().body(fail("请先登录"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
         if (!GroupBuy.STATUS_OPEN.equals(groupBuy.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("该拼单已" + groupBuy.getStatus() + "，不能加入了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "该拼单已" + groupBuy.getStatus() + "，不能加入了"));
         }
         if (groupBuy.getMemberIds().contains(userId)) {
-            return ResponseEntity.badRequest().body(fail("你已经在这个拼单里了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("你已经在这个拼单里了"));
         }
-        String building = text(body, "building");
+        String building = RequestUtils.textOf(body, "building");
         if (building.isEmpty()) {
-            return ResponseEntity.badRequest().body(fail("请填写你所在的宿舍楼"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请填写你所在的宿舍楼"));
         }
         if (!building.equals(groupBuy.getBuilding())) {
-            return ResponseEntity.badRequest().body(fail(
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
                     "这个拼单只限「" + groupBuy.getBuilding() + "」的同学，你填的是「" + building + "」"));
         }
 
@@ -159,14 +158,13 @@ public class GroupBuyController {
         }
         groupBuyRepository.save(groupBuy);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("status", groupBuy.getStatus());
-        result.put("joinedCount", groupBuy.getMemberIds().size());
-        result.put("message", full
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("status", groupBuy.getStatus());
+        extras.put("joinedCount", groupBuy.getMemberIds().size());
+        String msg = full
                 ? "拼单人数已满，成团成功！去消息里和同学们约个时间吧"
-                : "已加入拼单，还差 " + (groupBuy.getTargetCount() - groupBuy.getMemberIds().size()) + " 人");
-        return ResponseEntity.ok(result);
+                : "已加入拼单，还差 " + (groupBuy.getTargetCount() - groupBuy.getMemberIds().size()) + " 人";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     // 取消拼单（发起人或成员都可以退）
@@ -175,14 +173,14 @@ public class GroupBuyController {
     public ResponseEntity<?> cancel(@PathVariable Long id, @RequestBody Map<String, Object> body) {
         GroupBuy groupBuy = groupBuyRepository.findById(id).orElse(null);
         if (groupBuy == null) {
-            return ResponseEntity.badRequest().body(fail("拼单不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("拼单不存在"));
         }
-        Long userId = longOf(body, "userId");
+        Long userId = RequestUtils.longOf(body, "userId");
         if (userId == null || !groupBuy.getMemberIds().contains(userId)) {
-            return ResponseEntity.badRequest().body(fail("你不在这个拼单里"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("你不在这个拼单里"));
         }
         if (GroupBuy.STATUS_DONE.equals(groupBuy.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("拼单已成团，不能取消了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("拼单已成团，不能取消了"));
         }
 
         if (userId.equals(groupBuy.getInitiatorId())) {
@@ -194,12 +192,10 @@ public class GroupBuyController {
         }
         groupBuyRepository.save(groupBuy);
 
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", true);
-        result.put("status", groupBuy.getStatus());
-        result.put("message", userId.equals(groupBuy.getInitiatorId())
-                ? "已取消该拼单" : "已退出拼单");
-        return ResponseEntity.ok(result);
+        Map<String, Object> extras = new LinkedHashMap<>();
+        extras.put("status", groupBuy.getStatus());
+        String msg = userId.equals(groupBuy.getInitiatorId()) ? "已取消该拼单" : "已退出拼单";
+        return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
     private Map<String, Object> view(GroupBuy groupBuy) {
@@ -225,41 +221,5 @@ public class GroupBuyController {
         item.put("status", groupBuy.getStatus());
         item.put("createdAt", groupBuy.getCreatedAt());
         return item;
-    }
-
-    private String text(Map<String, Object> body, String key) {
-        Object value = body == null ? null : body.get(key);
-        return value == null ? "" : value.toString().trim();
-    }
-
-    private Long longOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Long.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Integer intOf(Map<String, Object> body, String key) {
-        String value = text(body, key);
-        if (value.isEmpty()) {
-            return null;
-        }
-        try {
-            return Integer.valueOf(value);
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
     }
 }

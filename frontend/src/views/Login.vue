@@ -2,32 +2,39 @@
 import { ref, reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import request from '../api'
+import { useApiRequest } from '../composables/useApiRequest'
+import { setUser } from '../session'
 
 const router = useRouter()
 const activeTab = ref('login')
 const loginForm = reactive({ stuid: '', password: '' })
 const regForm = reactive({ username: '', stuid: '', password: '' })
 
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error
+// 并抛异常，业务字段失败（data.success=false）由调用方处理
+const loginApi = useApiRequest('登录失败，请重试')
+const registerApi = useApiRequest('注册失败，请重试')
+
 async function onLogin() {
   if (!loginForm.stuid.trim() || !loginForm.password.trim()) {
     ElMessage.warning('请输入账号和密码')
     return
   }
+  const params = new URLSearchParams()
+  params.append('stuid', loginForm.stuid.trim())
+  params.append('password', loginForm.password.trim())
   try {
-    const params = new URLSearchParams()
-    params.append('stuid', loginForm.stuid.trim())
-    params.append('password', loginForm.password.trim())
-    const { data } = await request.post('/login', params)
-    if (data.success) {
-      localStorage.setItem('user', JSON.stringify(data.user))
-      ElMessage.success('登录成功')
-      router.push('/')
-    } else {
+    const { data } = await loginApi.post('/login', params)
+    if (!data.success) {
       ElMessage.error(data.msg || data.message || '登录失败')
+      return
     }
-  } catch (e) {
-    ElMessage.error('网络错误，请检查后端服务')
+    // 写进共享会话对象（同时落 localStorage），导航栏立刻显示新登录的用户和头像
+    setUser(data.user)
+    ElMessage.success('登录成功')
+    router.push('/')
+  } catch {
+    // useApiRequest 已统一提示过业务无关的失败，这里只需吞掉异常防止外层冒泡
   }
 }
 
@@ -36,21 +43,21 @@ async function onRegister() {
     ElMessage.warning('请填写完整信息')
     return
   }
+  const params = new URLSearchParams()
+  params.append('username', regForm.username.trim())
+  params.append('stuid', regForm.stuid.trim())
+  params.append('password', regForm.password.trim())
   try {
-    const params = new URLSearchParams()
-    params.append('username', regForm.username.trim())
-    params.append('stuid', regForm.stuid.trim())
-    params.append('password', regForm.password.trim())
-    const { data } = await request.post('/register', params)
-    if (data.success) {
-      ElMessage.success('注册成功，请登录')
-      activeTab.value = 'login'
-      loginForm.stuid = regForm.stuid
-    } else {
+    const { data } = await registerApi.post('/register', params)
+    if (!data.success) {
       ElMessage.error(data.message || '注册失败')
+      return
     }
-  } catch (e) {
-    ElMessage.error('网络错误，请检查后端服务')
+    ElMessage.success('注册成功，请登录')
+    activeTab.value = 'login'
+    loginForm.stuid = regForm.stuid
+  } catch {
+    // 同上：网络/HTTP 错误已被 useApiRequest 处理
   }
 }
 </script>

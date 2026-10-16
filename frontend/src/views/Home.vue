@@ -2,12 +2,18 @@
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { useCurrentUser } from '../composables/useCurrentUser'
+import { categoryIcon } from '../icons'
 
 const route = useRoute()
 const router = useRouter()
 
-// 分类胶囊（emoji 图标为自定义校园元素）
+// 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
+const api = useApiRequest('操作失败，请检查后端服务')
+
+// 分类胶囊（图标见 icons.js；某个分类还没图时回退成这里的 emoji）
 const categories = [
   { name: '全部', emoji: '✨' },
   { name: '电子产品', emoji: '📱' },
@@ -54,7 +60,7 @@ const goodsReviews = ref({ summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] })
 
 async function loadGoodsReviews(goodsId) {
   try {
-    const { data } = await request.get(`/reviews/goods/${goodsId}`)
+    const { data } = await api.get(`/reviews/goods/${goodsId}`)
     goodsReviews.value = {
       summary: data.summary || { ...EMPTY_REVIEW_SUMMARY },
       data: data.data || []
@@ -70,7 +76,7 @@ async function loadGoods() {
     const params = {}
     if (activeCategory.value !== '全部') params.category = activeCategory.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
-    const { data } = await request.get('/goods', { params })
+    const { data } = await api.get('/goods', { params })
     goodsList.value = data
   } catch (e) {
     ElMessage.error('宝贝加载失败，请检查后端服务')
@@ -107,7 +113,7 @@ async function doSearch() {
   try {
     const params = { keyword: kw, topK: 12 }
     if (activeCategory.value !== '全部') params.category = activeCategory.value
-    const { data } = await request.get('/ai/search', { params })
+    const { data } = await api.get('/ai/search', { params })
     if (data.success && data.semantic && data.data.length > 0) {
       semanticHits = data.data
     }
@@ -131,7 +137,6 @@ async function showDetail(goods) {
   detailVisible.value = true
   sellerName.value = ''
   sellerInfo.value = null
-  groupBuys.value = []
   goodsReviews.value = { summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] }
   try {
     const { data } = await request.get(`/users/${goods.userId}`)
@@ -141,163 +146,19 @@ async function showDetail(goods) {
   } catch (e) {
     // 卖家信息拿不到不影响详情展示
   }
-  // C3：这件宝贝上正在进行的宿舍楼拼单
-  loadGroupBuys(goods.id)
   // B3：这件宝贝收到的评价
   loadGoodsReviews(goods.id)
 }
 
-// —— C3 宿舍楼拼单 ——
-const groupBuys = ref([])
-const buildings = ['1 栋', '2 栋', '3 栋', '5 栋', '6 栋', '7 栋', '8 栋',
-                   '9 栋', '10 栋', '11 栋', '12 栋', '研究生楼']
-const groupBuyVisible = ref(false)
-const groupBuyForm = ref({ building: '', targetCount: 3 })
-const groupBuySubmitting = ref(false)
-const joinVisible = ref(false)
-const joinForm = ref({ building: '' })
-const activeGroupBuy = ref(null)
-const joining = ref(false)
-
-async function loadGroupBuys(goodsId) {
-  try {
-    const { data } = await request.get(`/groupbuy/goods/${goodsId}`)
-    groupBuys.value = data.data || []
-  } catch (e) {
-    groupBuys.value = []
-  }
-}
-
-function requireLogin() {
-  const current = JSON.parse(localStorage.getItem('user') || 'null')
-  if (!current) {
-    ElMessage.warning('请先登录')
-    router.push('/login')
-    return null
-  }
-  return current
-}
-
-function openGroupBuy() {
-  const current = requireLogin()
-  if (!current) return
-  groupBuyForm.value = { building: '', targetCount: 3 }
-  groupBuyVisible.value = true
-}
-
-async function submitGroupBuy() {
-  const current = requireLogin()
-  if (!current) return
-  if (!groupBuyForm.value.building) {
-    ElMessage.warning('请选择你所在的宿舍楼')
-    return
-  }
-  groupBuySubmitting.value = true
-  try {
-    const { data } = await request.post('/groupbuy', {
-      goodsId: detailGoods.value.id,
-      initiatorId: current.id,
-      building: groupBuyForm.value.building,
-      targetCount: groupBuyForm.value.targetCount
-    })
-    if (data.success) {
-      ElMessage.success(data.message)
-      groupBuyVisible.value = false
-      loadGroupBuys(detailGoods.value.id)
-    } else {
-      ElMessage.error(data.message || '发起失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '发起失败，请检查后端服务')
-  } finally {
-    groupBuySubmitting.value = false
-  }
-}
-
-function openJoin(gb) {
-  const current = requireLogin()
-  if (!current) return
-  activeGroupBuy.value = gb
-  joinForm.value.building = gb.building
-  joinVisible.value = true
-}
-
-async function submitJoin() {
-  const current = requireLogin()
-  if (!current) return
-  joining.value = true
-  try {
-    const { data } = await request.post(`/groupbuy/${activeGroupBuy.value.id}/join`, {
-      userId: current.id,
-      building: joinForm.value.building
-    })
-    if (data.success) {
-      ElMessage.success(data.message)
-      joinVisible.value = false
-      loadGroupBuys(detailGoods.value.id)
-    } else {
-      ElMessage.error(data.message || '加入失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '加入失败，请检查后端服务')
-  } finally {
-    joining.value = false
-  }
-}
-
-// —— C4 以物换物 ——
-const barterVisible = ref(false)
-const barterForm = ref({ offerTitle: '', offerDesc: '' })
-const barterSubmitting = ref(false)
-
-function openBarter() {
-  const current = requireLogin()
-  if (!current) return
-  if (detailGoods.value && current.id === detailGoods.value.userId) {
-    ElMessage.warning('这是你自己发布的宝贝')
-    return
-  }
-  barterForm.value = { offerTitle: '', offerDesc: '' }
-  barterVisible.value = true
-}
-
-async function submitBarter() {
-  const current = requireLogin()
-  if (!current) return
-  if (!barterForm.value.offerTitle.trim()) {
-    ElMessage.warning('请填写你打算用什么来换')
-    return
-  }
-  barterSubmitting.value = true
-  try {
-    const { data } = await request.post('/barter', {
-      goodsId: detailGoods.value.id,
-      requesterId: current.id,
-      offerTitle: barterForm.value.offerTitle,
-      offerDesc: barterForm.value.offerDesc
-    })
-    if (data.success) {
-      ElMessage.success(data.message)
-      barterVisible.value = false
-    } else {
-      ElMessage.error(data.message || '发起失败')
-    }
-  } catch (e) {
-    ElMessage.error(e.response?.data?.message || '发起失败，请检查后端服务')
-  } finally {
-    barterSubmitting.value = false
-  }
-}
-
 // 联系卖家：登录后才能聊，自己发布的宝贝不能聊自己
 function contactSeller(goods) {
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = useCurrentUser()
   if (!user) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
     return
   }
-  if (user.id === goods.userId) {
+  if (user.value.id === goods.userId) {
     ElMessage.warning('这是你自己发布的宝贝')
     return
   }
@@ -311,7 +172,7 @@ function buyFromDetail() {
 }
 
 function openBuy(goods) {
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = useCurrentUser()
   if (!user) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
@@ -329,7 +190,7 @@ function chooseAddress(idx) {
 }
 
 async function confirmOrder() {
-  const user = JSON.parse(localStorage.getItem('user') || 'null')
+  const user = useCurrentUser()
   let receiver, phone, address
 
   if (selectedAddress.value !== null) {
@@ -348,9 +209,9 @@ async function confirmOrder() {
   }
 
   try {
-    const { data } = await request.post('/orders', {
+    const { data } = await api.post('/orders', {
       goodsId: buyGoods.value.id,
-      buyerId: user.id,
+      buyerId: user.value.id,
       receiver,
       phone,
       address
@@ -363,7 +224,7 @@ async function confirmOrder() {
       ElMessage.error(data.message || '下单失败')
     }
   } catch (e) {
-    ElMessage.error(e.response?.data?.message || '下单失败，请检查后端服务')
+    // useApiRequest 已统一提示（或当前是 request.* 直调，由后端 message 自动展示）
   }
 }
 
@@ -377,7 +238,7 @@ async function openFromQuery() {
   const goodsId = route.query.goodsId
   if (!goodsId) return
   try {
-    const { data } = await request.get(`/goods/${goodsId}`)
+    const { data } = await api.get(`/goods/${goodsId}`)
     if (data && data.id) {
       showDetail(data)
     }
@@ -406,7 +267,8 @@ async function openFromQuery() {
     <div class="cate-bar">
       <div v-for="c in categories" :key="c.name" class="cate-chip" :class="{ active: activeCategory === c.name }"
         @click="selectCategory(c.name)">
-        <span class="cate-emoji">{{ c.emoji }}</span>
+        <img  loading="lazy"v-if="categoryIcon(c.name)" class="cate-icon" :src="categoryIcon(c.name)" :alt="c.name">
+        <span v-else class="cate-emoji">{{ c.emoji }}</span>
         <span>{{ c.name }}</span>
       </div>
     </div>
@@ -425,13 +287,12 @@ async function openFromQuery() {
         :description="keyword.trim() ? '没找到匹配的宝贝，换个说法试试' : '这个分类暂无宝贝，去看看别的吧'" />
       <div class="feed-grid">
         <div v-for="item in goodsList" :key="item.id" class="goods-card">
-          <img class="gc-img" :src="getImageUrl(item.images?.[0]?.imageUrl)" alt="宝贝" @click="showDetail(item)">
+          <img v-img-fallback  loading="lazy"class="gc-img" :src="getImageUrl(item.images?.[0]?.imageUrl)" alt="宝贝" @click="showDetail(item)">
           <div class="gc-body">
             <div class="gc-title" @click="showDetail(item)">{{ item.title }}</div>
             <div class="gc-tags">
               <span class="gc-tag gc-tag-school">🎓 校园面交</span>
-              <span v-if="item.courseCode" class="gc-tag gc-tag-course">📚 {{ item.courseCode }}</span>
-              <span v-else class="gc-tag gc-tag-student">学生自用</span>
+              <span class="gc-tag gc-tag-student">学生自用</span>
             </div>
             <div class="gc-bottom">
               <div class="gc-price">¥<span class="gc-price-num">{{ item.price }}</span></div>
@@ -449,14 +310,13 @@ async function openFromQuery() {
   <!-- 宝贝详情 -->
   <el-dialog v-model="detailVisible" title="宝贝详情" width="560px" round>
     <div v-if="detailGoods" class="detail">
-      <img class="detail-img" :src="getImageUrl(detailGoods.images?.[0]?.imageUrl)" alt="宝贝">
+      <img v-img-fallback  loading="lazy"class="detail-img" :src="getImageUrl(detailGoods.images?.[0]?.imageUrl)" alt="宝贝">
       <div class="detail-info">
         <div class="detail-price">¥<span>{{ detailGoods.price }}</span></div>
         <div class="detail-title">{{ detailGoods.title }}</div>
         <div class="detail-tags">
           <span class="gc-tag gc-tag-school">🎓 校园面交</span>
           <span class="gc-tag gc-tag-cate">{{ detailGoods.category }}</span>
-          <span v-if="detailGoods.courseCode" class="gc-tag gc-tag-course">📚 {{ detailGoods.courseCode }}</span>
         </div>
         <div class="detail-seller">
           卖家：{{ sellerName || '—' }}
@@ -468,30 +328,8 @@ async function openFromQuery() {
         <div class="detail-desc-title">宝贝描述</div>
         <p class="detail-desc">{{ detailGoods.description || '暂无描述' }}</p>
 
-        <!-- C3 宿舍楼拼单：同一栋楼的同学凑人数 -->
         <el-collapse class="detail-extra">
-          <el-collapse-item name="group">
-            <template #title>
-              <span class="extra-title">🏠 宿舍楼拼单</span>
-              <span v-if="groupBuys.length" class="extra-badge">{{ groupBuys.length }} 个进行中</span>
-            </template>
-            <el-empty v-if="groupBuys.length === 0" description="这件宝贝还没有人发起拼单" :image-size="50" />
-            <div v-for="gb in groupBuys" :key="gb.id" class="gb-item">
-              <div class="gb-head">
-                <span class="gb-building">🏢 {{ gb.building }}</span>
-                <el-tag size="small" :type="gb.status === '拼单中' ? 'warning' : 'success'">{{ gb.status }}</el-tag>
-              </div>
-              <div class="gb-meta">
-                发起人 {{ gb.initiatorName }} · 已参与 <b>{{ gb.joinedCount }}</b>/{{ gb.targetCount }} 人
-              </div>
-              <div class="gb-members">成员：{{ gb.members.map(m => m.name).join('、') }}</div>
-              <el-button v-if="gb.status === '拼单中'" size="small" type="primary" plain
-                @click="openJoin(gb)">我也要拼</el-button>
-            </div>
-            <el-button size="small" class="gb-create" @click="openGroupBuy">＋ 发起拼单</el-button>
-          </el-collapse-item>
-
-          <!-- B3 商品评价：买家评卖家 + 卖家评买家，双向可见 -->
+        <!-- B3 商品评价：买家评卖家 + 卖家评买家，双向可见 -->
           <el-collapse-item name="review">
             <template #title>
               <span class="extra-title">💬 商品评价</span>
@@ -531,74 +369,15 @@ async function openFromQuery() {
     </div>
     <template #footer>
       <el-button round @click="detailVisible = false">关闭</el-button>
-      <el-button round @click="openBarter">🔄 换一换</el-button>
       <el-button round @click="contactSeller(detailGoods)">联系卖家</el-button>
       <el-button type="primary" round @click="buyFromDetail">我想要</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- C3 发起拼单 -->
-  <el-dialog v-model="groupBuyVisible" title="发起宿舍楼拼单" width="420px">
-    <div class="gb-form">
-      <div class="gb-form-row">
-        <span class="gb-label">我的楼栋</span>
-        <el-select v-model="groupBuyForm.building" placeholder="选择你所在的宿舍楼" style="flex: 1">
-          <el-option v-for="b in buildings" :key="b" :label="b" :value="b" />
-        </el-select>
-      </div>
-      <div class="gb-form-row">
-        <span class="gb-label">成团人数</span>
-        <el-input-number v-model="groupBuyForm.targetCount" :min="2" :max="20" />
-      </div>
-      <p class="gb-note">拼单只对本栋楼的同学开放，人满自动成团。</p>
-    </div>
-    <template #footer>
-      <el-button @click="groupBuyVisible = false">取消</el-button>
-      <el-button type="primary" :loading="groupBuySubmitting" @click="submitGroupBuy">发起拼单</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- C3 参与拼单 -->
-  <el-dialog v-model="joinVisible" title="参与拼单" width="400px">
-    <div class="gb-form">
-      <div class="gb-form-row">
-        <span class="gb-label">我的楼栋</span>
-        <el-select v-model="joinForm.building" placeholder="选择你所在的宿舍楼" style="flex: 1">
-          <el-option v-for="b in buildings" :key="b" :label="b" :value="b" />
-        </el-select>
-      </div>
-      <p class="gb-note">
-        这个拼单限定「{{ activeGroupBuy?.building }}」，只能同栋楼的同学加入。
-      </p>
-    </div>
-    <template #footer>
-      <el-button @click="joinVisible = false">取消</el-button>
-      <el-button type="primary" :loading="joining" @click="submitJoin">确认加入</el-button>
-    </template>
-  </el-dialog>
-
-  <!-- C4 发起换物 -->
-  <el-dialog v-model="barterVisible" title="以物换物" width="440px">
-    <div class="gb-form">
-      <div class="gb-form-row">
-        <span class="gb-label">我拿什么换</span>
-        <el-input v-model="barterForm.offerTitle" maxlength="40" show-word-limit
-          placeholder="例如：九成新的 Kindle Paperwhite" style="flex: 1" />
-      </div>
-      <el-input v-model="barterForm.offerDesc" type="textarea" :rows="3" maxlength="300" show-word-limit
-        placeholder="补充说明（选填）：成色、配件、为什么想换…" />
-      <p class="gb-note">换物不涉及付款，对方同意后你们自行约时间交接。</p>
-    </div>
-    <template #footer>
-      <el-button @click="barterVisible = false">取消</el-button>
-      <el-button type="primary" :loading="barterSubmitting" @click="submitBarter">发出换物请求</el-button>
     </template>
   </el-dialog>
 
   <!-- 确认订单 -->
   <el-dialog v-model="buyVisible" title="确认订单" width="520px">
     <div v-if="buyGoods" class="order-goods">
-      <img :src="getImageUrl(buyGoods.images?.[0]?.imageUrl)" alt="宝贝">
+      <img v-img-fallback  loading="lazy" :src="getImageUrl(buyGoods.images?.[0]?.imageUrl)" alt="宝贝">
       <div class="order-goods-info">
         <div class="order-goods-title">{{ buyGoods.title }}</div>
         <div class="order-goods-price">¥{{ buyGoods.price }}</div>
@@ -658,7 +437,6 @@ async function openFromQuery() {
 }
 .sm-tag.semantic { background: #e8f3ff; color: #1a5fb4; }
 .sm-count { font-size: 12px; color: #999; }
-.gc-tag-course { background: #eaf7ea; color: #2e7d32; }
 
 /* C3/C4 详情弹窗里的附加区 */
 .detail-extra { margin-top: 12px; }
@@ -671,18 +449,6 @@ async function openFromQuery() {
   border-radius: 8px;
   padding: 1px 8px;
 }
-.gb-item {
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
-  padding: 10px 12px;
-  margin-bottom: 8px;
-}
-.gb-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.gb-building { font-weight: 600; font-size: 13px; color: var(--ink-color); }
-.gb-meta { font-size: 12px; color: #888; margin: 5px 0 3px; }
-.gb-members { font-size: 12px; color: #aaa; margin-bottom: 8px; }
-.gb-create { margin-top: 4px; }
-
 /* B3 商品评价 */
 .rv-item { padding: 10px 0; border-top: 1px solid #f0f0f0; }
 .rv-item:first-of-type { border-top: none; }
@@ -701,9 +467,6 @@ async function openFromQuery() {
 }
 .rv-stat { font-size: 12px; color: #999; }
 .extra-badge.score { background: #fff3c2; color: #8a6100; }
-.gb-form-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
-.gb-label { width: 72px; font-size: 13px; color: #888; flex-shrink: 0; }
-.gb-note { font-size: 12px; color: #bbb; line-height: 1.6; margin: 4px 0 0; }
 .seller-tag { margin-left: 6px; }
 .hero-search :deep(.el-input__wrapper) { border-radius: 20px; }
 
@@ -735,7 +498,16 @@ async function openFromQuery() {
   border-color: var(--ink-color);
   font-weight: 600;
 }
-.cate-emoji { font-size: 15px; }
+/* 分类图标：图片本身已带圆角透明，深浅底色都不露白角；高度和文字行高对齐，
+   这样「全部」（emoji 兜底）和带图标的胶囊高度一致 */
+.cate-icon {
+  width: 20px;
+  height: 20px;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+.cate-emoji { font-size: 15px; line-height: 20px; }
 
 /* 宝贝卡片流 */
 .feed { min-height: 300px; }
@@ -830,3 +602,4 @@ async function openFromQuery() {
 .addr-name { font-weight: bold; }
 .addr-detail { font-size: 13px; color: #666; margin-top: 4px; }
 </style>
+

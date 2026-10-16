@@ -1,7 +1,6 @@
 package com.example.demo.controller;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -21,6 +20,8 @@ import com.example.demo.entity.User;
 import com.example.demo.repository.GoodsRepository;
 import com.example.demo.repository.MessageRepository;
 import com.example.demo.repository.UserRepository;
+import com.example.demo.web.ApiResponses;
+import com.example.demo.web.RequestUtils;
 
 // 买家与卖家沟通：围绕某件商品的一对一消息
 @RestController
@@ -39,21 +40,23 @@ public class MessageController {
     // 发送一条消息
     @PostMapping
     public ResponseEntity<?> send(@RequestBody Map<String, Object> body) {
-        Long goodsId = Long.valueOf(body.get("goodsId").toString());
-        Long fromUserId = Long.valueOf(body.get("fromUserId").toString());
-        Long toUserId = Long.valueOf(body.get("toUserId").toString());
-        String content = body.get("content") == null ? "" : body.get("content").toString().trim();
-
+        Long goodsId = RequestUtils.longOf(body, "goodsId");
+        Long fromUserId = RequestUtils.longOf(body, "fromUserId");
+        Long toUserId = RequestUtils.longOf(body, "toUserId");
+        String content = RequestUtils.textOf(body, "content");
+        if (goodsId == null || fromUserId == null || toUserId == null) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少必要的消息标识"));
+        }
         if (content.isEmpty()) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "消息内容不能为空"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("消息内容不能为空"));
         }
         if (fromUserId.equals(toUserId)) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "不能给自己发送消息"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("不能给自己发送消息"));
         }
 
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
-            return ResponseEntity.badRequest().body(Map.of("success", false, "message", "商品不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
         }
 
         Message msg = new Message();
@@ -64,7 +67,7 @@ public class MessageController {
         msg.setContent(content);
         messageRepository.save(msg);
 
-        return ResponseEntity.ok(Map.of("success", true, "message", "已发送"));
+        return ResponseEntity.ok(ApiResponses.ok("已发送"));
     }
 
     // 查询某件商品下两个人的完整对话
@@ -87,7 +90,7 @@ public class MessageController {
             // 列表已按时间倒序，同一个会话保留第一条（最新）即可
             if (grouped.containsKey(key)) continue;
 
-            Map<String, Object> item = new HashMap<>();
+            Map<String, Object> item = new LinkedHashMap<>();
             item.put("goodsId", m.getGoodsId());
             item.put("goodsTitle", m.getGoodsTitle());
             item.put("peerId", peerId);

@@ -25,6 +25,7 @@ import com.example.demo.repository.OrderRepository;
 import com.example.demo.repository.ReviewRepository;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.CreditService;
+import com.example.demo.web.ApiResponses;
 
 /**
  * 双向评价与信用分（B3）。
@@ -57,18 +58,18 @@ public class ReviewController {
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
         if (body.get("orderId") == null || body.get("reviewerId") == null) {
-            return ResponseEntity.badRequest().body(fail("缺少订单或用户标识"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少订单或用户标识"));
         }
         Long orderId = Long.valueOf(body.get("orderId").toString());
         Long reviewerId = Long.valueOf(body.get("reviewerId").toString());
 
         Order order = orderRepository.findById(orderId).orElse(null);
         if (order == null) {
-            return ResponseEntity.badRequest().body(fail("订单不存在"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("订单不存在"));
         }
         // 历史数据里存在买卖双方为同一人的订单，这种订单不存在"对方"，直接不允许评价
         if (order.getBuyerId() == null || order.getBuyerId().equals(order.getSellerId())) {
-            return ResponseEntity.badRequest().body(fail("这笔订单的买卖双方是同一人，无法评价"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这笔订单的买卖双方是同一人，无法评价"));
         }
 
         String role;
@@ -80,28 +81,28 @@ public class ReviewController {
             role = "seller";
             revieweeId = order.getBuyerId();
         } else {
-            return ResponseEntity.badRequest().body(fail("你不是这笔订单的参与方"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("你不是这笔订单的参与方"));
         }
         // 兜底：不能给自己打分，否则信用分会被自己刷高
         if (revieweeId == null || revieweeId.equals(reviewerId)) {
-            return ResponseEntity.badRequest().body(fail("不能评价自己"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("不能评价自己"));
         }
 
         if (!REVIEWABLE_STATUS.equals(order.getStatus())) {
-            return ResponseEntity.badRequest().body(fail("订单完成后才能评价"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("订单完成后才能评价"));
         }
         if (reviewRepository.existsByOrderIdAndReviewerId(orderId, reviewerId)) {
-            return ResponseEntity.badRequest().body(fail("这笔订单你已经评价过了"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("这笔订单你已经评价过了"));
         }
 
         Integer score = parseScore(body.get("score"));
         if (score == null) {
-            return ResponseEntity.badRequest().body(fail("请给 1-5 星评价"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("请给 1-5 星评价"));
         }
 
         String content = body.get("content") == null ? "" : body.get("content").toString().trim();
         if (content.length() > MAX_CONTENT) {
-            return ResponseEntity.badRequest().body(fail("评价内容不能超过 " + MAX_CONTENT + " 字"));
+            return ResponseEntity.badRequest().body(ApiResponses.fail("评价内容不能超过 " + MAX_CONTENT + " 字"));
         }
 
         Review review = new Review();
@@ -231,11 +232,5 @@ public class ReviewController {
             return null;
         }
     }
-
-    private Map<String, Object> fail(String message) {
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("success", false);
-        result.put("message", message);
-        return result;
-    }
+
 }
