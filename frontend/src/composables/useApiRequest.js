@@ -26,24 +26,34 @@ import request from '../api'
  * - `response`：原始 axios 响应，方便需要 status / headers 的场景
  *
  * @param {string} [fallbackError] 自定义错误提示；省略则使用后端的 message，
- *                                再省略则给一个通用提示。
+ *                                再省略则按失败类型给一个通用提示。
  */
 export function useApiRequest(fallbackError) {
+  /**
+   * @param {object} [options] axios 配置；额外支持 `silent: true` ——
+   *   只抛出、不弹提示，给「调用方自己会弹一条更具体的中文提示」的场景用
+   *   （不传的话就会弹两次：这里一次、调用方一次）。
+   */
   async function call(method, url, options) {
+    const { silent, ...config } = options || {}
     try {
-      const response = await request.request({
-        method,
-        url,
-        ...options
-      })
+      const response = await request.request({ method, url, ...config })
       return { data: response.data, response }
     } catch (e) {
-      const msg = e.response?.data?.message
-        || e.response?.data?.msg
-        || e.message
-        || fallbackError
-        || '请求失败，请检查后端服务'
-      ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
+      if (!silent) {
+        // 顺序很关键：这里**不能**用 e.message。
+        // axios 的 e.message 永远有值（"Request failed with status code 500"、
+        // "timeout of 10000ms exceeded"），排在前面会让调用方传的中文 fallbackError
+        // 永远轮不到，用户看到的是一句英文。
+        // 后端返回非 JSON 错误体（Spring 默认的 500/404 HTML）时正是这种情况。
+        const msg = e.response?.data?.message
+          || e.response?.data?.msg
+          || (e.code === 'ECONNABORTED' ? '请求超时，请稍后重试' : null)
+          || fallbackError
+          || (e.response ? `服务异常（${e.response.status}），请稍后重试`
+                         : '网络连接失败，请检查后端服务')
+        ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
+      }
       throw e
     }
   }
@@ -56,31 +66,5 @@ export function useApiRequest(fallbackError) {
   }
 }
 
-/**
- * 简单的 loading + 错误处理包裹：保留组件里手写的成功逻辑，
- * 只把 try/catch + loading 收尾挪到这里。
- *
- * 用法：
- * <pre>
- * const loading = ref(false)
- * await withLoading(loading, async () => {
- *   const { data } = await request.get('/orders')
- *   orders.value = data
- * })
- * </pre>
- */
-export async function withLoading(loadingRef, fn, fallbackError) {
-  loadingRef.value = true
-  try {
-    return await fn()
-  } catch (e) {
-    const msg = e.response?.data?.message
-      || e.response?.data?.msg
-      || (typeof fallbackError === 'string' ? fallbackError : null)
-      || '请求失败，请检查后端服务'
-    ElMessage.error(typeof msg === 'string' ? msg : '请求失败')
-    throw e
-  } finally {
-    loadingRef.value = false
-  }
-}
+// 注：这里原本还有一个 withLoading(loadingRef, fn, fallbackError) 导出，
+// 全仓库没有任何调用点（各视图最终都改用了上面的 useApiRequest），已经删掉。

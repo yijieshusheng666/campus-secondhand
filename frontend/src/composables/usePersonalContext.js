@@ -28,6 +28,10 @@ const contextText = ref('')
 const loading = ref(false)
 let fetchedAt = 0
 let inflight = null
+/** 缓存属于哪个用户。只按 TTL 判断的话，换账号后 60 秒内会直接命中上一个人的缓存。 */
+let cachedUid = null
+/** 代数计数器：每次清空 +1，让所有在途响应作废。 */
+let generation = 0
 
 /** 各条数据最多列几行 —— 全量塞进提示词既贵又会让模型挑花眼 */
 function take(list, n = MAX_ROWS) {
@@ -59,12 +63,16 @@ export function ensurePersonalContext({ force = false } = {}) {
     contextText.value = ''
     return Promise.resolve('')
   }
-  if (!force && contextText.value && Date.now() - fetchedAt < TTL_MS) {
+  // 缓存必须同时绑定「仍是同一个人」：只按 TTL 判断的话，同一台电脑换账号登录后
+  // 60 秒内会直接把上一位用户的闲置/订单/求购文本发给 AI 服务。
+  if (!force && contextText.value && cachedUid === user.value.id
+      && Date.now() - fetchedAt < TTL_MS) {
     return Promise.resolve(contextText.value)
   }
   if (inflight) return inflight
 
   const uid = user.value.id
+  const myGen = ++generation
   loading.value = true
   inflight = Promise.allSettled([
     request.get('/goods'),
@@ -72,6 +80,10 @@ export function ensurePersonalContext({ force = false } = {}) {
     request.get('/orders', { params: { userId: uid, role: 'buyer' } }),
     request.get('/wanted', { params: { userId: uid } })
   ]).then(([goodsRes, sellRes, buyRes, wantRes]) => {
+    // 这期间退出登录或换了账号：这批数据属于上一个人，直接丢弃。
+    // 少了这道判断，退出瞬间在途的请求落地后会把旧数据又写回缓存。
+    if (myGen !== generation) return ''
+
     const goods = unwrap(goodsRes, 'goods').filter(g => g.userId == uid)
     const sold = unwrap(sellRes, 'orders')
     const bought = unwrap(buyRes, 'orders')
@@ -108,11 +120,13 @@ export function ensurePersonalContext({ force = false } = {}) {
     // 三段全空就别把空壳塞进提示词，白白占 token 还可能诱导模型编造
     const hasAny = goods.length || sold.length || bought.length || wanted.length
     contextText.value = hasAny ? text : ''
+    cachedUid = uid
     fetchedAt = Date.now()
     return contextText.value
   }).finally(() => {
     loading.value = false
-    inflight = null
+    // 只在还是同一代时才清 inflight，否则会把后来那次请求的 Promise 抹掉
+    if (myGen === generation) inflight = null
   })
 
   return inflight
@@ -129,21 +143,28 @@ export function looksPersonal(question) {
   return FRONTEND_MARKERS.some(m => (question || '').includes(m))
 }
 
+/** 读取当前的个人数据文本（一个普通字符串）。
+ *
+ *  ⚠️ 这里必须返回 `.value` 而不是 ref 本身。
+ *  返回 ref 的话，JSON.stringify 出来是 {"_rawValue":"","_value":""} 这种 Vue 内部结构，
+ *  FastAPI 收到后直接 422（"Input should be a valid string"），
+ *  Java 捕获异常后下发 event: error，前端就显示「离线兜底」。
+ *  这个 bug 只在**非个人类问题**上出现（那条分支才调 getPersonalContext），
+ *  而个人类问题走的是 ensurePersonalContext()，返回的是 Promise<string>，所以是对的 ——
+ *  于是现象变成「大部分问题都失败、偶尔正常」，极难定位。
+ */
 export function getPersonalContext() {
-  return contextText
-}
-
-export function personalLoading() {
-  return loading
+  return contextText.value
 }
 
 /** 退出登录 / 切换账号时必须清空，否则会把上一个用户的私有数据发给 AI 服务 */
 export function clearPersonalContext() {
+  generation++      // 让所有在途响应作废：光清缓存挡不住已经发出去、正在返回的请求
+  cachedUid = null
   contextText.value = ''
   fetchedAt = 0
   inflight = null
 }
 
-export function usePersonalContext() {
-  return { contextText, loading, ensurePersonalContext, clearPersonalContext }
-}
+// 注：这里原本还有一个 usePersonalContext() 导出，全仓库无人调用（ChatPanel 直接
+// import 具名函数），已经删掉——留着只会让人以为还有另一套用法。

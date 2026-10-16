@@ -19,10 +19,6 @@ const loadingMatch = ref(0)
 const matches = ref({})      // { [wantedId]: [goods...] }
 const matchMeta = ref({})    // { [wantedId]: { scanned, semanticCount, reasons } }
 
-function getImageUrl(path) {
-  if (!path) return ''
-  return path.startsWith('http') ? path : path
-}
 
 function formatTime(t) {
   if (!t) return ''
@@ -66,7 +62,7 @@ async function findMatches(wanted) {
 }
 
 function chatWithSeller(goods) {
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     router.push('/login')
     return
@@ -119,7 +115,7 @@ onMounted(loadSquare)
         <div v-if="matches[w.id]" class="goods-grid">
           <el-empty v-if="matches[w.id].length === 0" description="目前没有匹配且在售的商品" :image-size="60" />
           <div v-for="g in matches[w.id]" :key="g.id" class="goods-card">
-            <img v-img-fallback  loading="lazy" :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
+            <img v-img-fallback loading="lazy" :src="g.images?.[0]?.imageUrl" alt="宝贝">
             <div class="gc-title">{{ g.title }}</div>
             <div class="gc-price">¥{{ g.price }}</div>
             <div v-if="matchMeta[w.id]?.reasons?.[g.id]" class="gc-reason">

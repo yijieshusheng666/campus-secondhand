@@ -9,7 +9,11 @@ import java.time.LocalDateTime;
  * role 记录评价人当时的身份，便于前端区分「买家评我」与「卖家评我」。
  */
 @Entity
-@Table(name = "reviews")
+@Table(name = "reviews", indexes = {
+        @Index(name = "idx_reviews_reviewee", columnList = "reviewee_id"),
+        @Index(name = "idx_reviews_goods", columnList = "goods_id"),
+        @Index(name = "idx_reviews_order", columnList = "order_id")
+})
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Review {
     @Id

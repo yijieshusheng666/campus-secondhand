@@ -15,6 +15,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.User;
 import com.example.demo.repository.UserRepository;
 import com.example.demo.service.CreditService;
@@ -66,18 +67,12 @@ public class UserController {
         return ResponseEntity.ok(body);
     }
 
-    // 修改用户昵称 / 头像（两者都可以单独提交）
+    // 修改用户昵称 / 头像（两者都可以单独提交）。被改的用户取自 token：
+    // 从前读 body 里的 id，等于可以改任意人的昵称和头像
     @PostMapping("/user/update")
     @Transactional
     public ResponseEntity<Map<String, Object>> update(@RequestBody Map<String, Object> body) {
-        Object idRaw = body.get("id");
-        if (idRaw == null) {
-            Map<String, Object> err = new LinkedHashMap<>();
-            err.put("success", false);
-            err.put("message", "缺少用户标识");
-            return ResponseEntity.badRequest().body(err);
-        }
-        Long id = Long.valueOf(idRaw.toString());
+        Long id = AuthContext.requireUserId();
         String username = body.get("username") == null ? null : body.get("username").toString();
         String avatar = body.get("avatar") == null ? null : body.get("avatar").toString();
         boolean changeName = username != null && !username.isBlank();
@@ -121,10 +116,8 @@ public class UserController {
     @PostMapping("/user/verify")
     @Transactional
     public ResponseEntity<Map<String, Object>> verify(@RequestBody Map<String, Object> body) {
-        if (body.get("id") == null) {
-            return ResponseEntity.badRequest().body(verifyFail("缺少用户标识"));
-        }
-        Long id = Long.valueOf(body.get("id").toString());
+        // 认证对象取自 token：从前读 body 里的 id，等于可以把别人的账号标成已实名
+        Long id = AuthContext.requireUserId();
         User user = userRepository.findById(id).orElse(null);
         if (user == null) {
             return ResponseEntity.badRequest().body(verifyFail("用户不存在"));

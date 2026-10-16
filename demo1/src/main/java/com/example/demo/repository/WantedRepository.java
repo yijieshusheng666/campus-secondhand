@@ -12,5 +12,4 @@ public interface WantedRepository extends JpaRepository<Wanted, Long> {
 
     List<Wanted> findByStatusOrderByCreatedAtDesc(String status);
 
-    long countByStatus(String status);
 }

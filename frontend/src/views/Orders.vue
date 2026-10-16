@@ -3,7 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
-import request from '../api'
+import { escrowTag, statusTag } from '../constants/order'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import ReviewDialog from '../components/ReviewDialog.vue'
 import { statusIcon, escrowIcon, actionIcon } from '../icons'
@@ -17,29 +17,8 @@ const ordersApi = useApiRequest('订单操作失败')
 const disputeApi = useApiRequest('提交失败，请检查后端服务')
 const actionApi = useApiRequest('操作失败，请检查后端服务')
 
-const statusTag = {
-  '待付款': 'danger',
-  '待发货': 'warning',
-  '已发货': 'primary',
-  '已完成': 'success',
-  '退款中': 'info',
-  '已退款': 'info',
-  '已取消': 'info',
-  '仲裁中': 'warning'
-}
+// statusTag / escrowTag 来自 src/constants/order.js（曾与 User.vue 各抄一份导致配色漂移）
 
-// 资金状态：担保交易的关键——钱在哪
-const escrowTag = {
-  '未付款': 'info',
-  '平台托管': 'warning',
-  '已放款': 'success',
-  '已退回': 'info'
-}
-
-function getImageUrl(path) {
-  if (!path) return ''
-  return path.startsWith('http') ? path : path
-}
 
 function formatTime(t) {
   if (!t) return ''
@@ -47,7 +26,7 @@ function formatTime(t) {
 }
 
 async function loadOrders() {
-  if (!user) return
+  if (!user.value) return
   loading.value = true
   try {
     const { data } = await ordersApi.get('/orders', { params: { userId: user.value.id, role: 'buyer' } })
@@ -151,8 +130,11 @@ async function loadReviewedFlags() {
   for (const order of orders.value) {
     if (order.status !== '已完成') continue
     try {
+      // silent：这是「已完成订单逐笔查评价标记」的循环，一笔失败就该当未评价处理；
+      // 不 silent 的话 AI/后端抖动时会一次性弹出十几条错误提示
       const { data } = await ordersApi.get('/reviews/order', {
-        params: { orderId: order.id, reviewerId: user.value.id }
+        params: { orderId: order.id, reviewerId: user.value.id },
+        silent: true
       })
       if (data.reviewed) flags.add(order.id)
     } catch (e) {
@@ -174,7 +156,7 @@ function onReviewed() {
 }
 
 onMounted(async () => {
-  if (!user) return
+  if (!user.value) return
   await loadOrders()
   loadReviewedFlags()
 })
@@ -195,17 +177,17 @@ onMounted(async () => {
           <span class="order-id">订单号：{{ order.id }}</span>
           <div class="order-tags">
             <el-tag size="small" :type="escrowTag[order.escrowStatus] || 'info'">
-              <img  loading="lazy"v-if="escrowIcon(order.escrowStatus)" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
+              <img  loading="lazy" v-if="escrowIcon(order.escrowStatus)" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
               资金：{{ order.escrowStatus || '—' }}
             </el-tag>
             <el-tag :type="statusTag[order.status] || 'info'">
-              <img  loading="lazy"v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
+              <img  loading="lazy" v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
               {{ order.status }}
             </el-tag>
           </div>
         </div>
         <div class="order-content">
-          <img v-img-fallback  loading="lazy"class="order-img" :src="getImageUrl(order.goodsImage)" alt="商品">
+          <img v-img-fallback loading="lazy" class="order-img" :src="order.goodsImage" alt="商品">
           <div class="order-info">
             <div class="order-title">{{ order.goodsTitle }}</div>
             <div class="order-price">¥{{ order.goodsPrice }}</div>
@@ -223,7 +205,7 @@ onMounted(async () => {
               :type="a.status === '已取消' || a.status === '退款中' ? 'danger' : 'primary'"
               :plain="a.status === '已取消' || a.status === '退款中'"
               @click="handleAction(order, a)">
-              <img  loading="lazy"v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
+              <img  loading="lazy" v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
             </el-button>
             <span v-if="order.status === '退款中'" class="order-hint">等待卖家处理退款</span>
             <span v-if="order.status === '仲裁中'" class="order-hint">平台处理中，货款已冻结</span>

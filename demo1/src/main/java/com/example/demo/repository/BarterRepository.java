@@ -14,5 +14,4 @@ public interface BarterRepository extends JpaRepository<Barter, Long> {
 
     boolean existsByGoodsIdAndRequesterIdAndStatus(Long goodsId, Long requesterId, String status);
 
-    List<Barter> findByGoodsIdAndStatus(Long goodsId, String status);
 }

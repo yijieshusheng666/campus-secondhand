@@ -219,17 +219,6 @@ public class AiClient {
         }
     }
 
-    /** 取文本响应（CSV 导出等非 JSON 接口用）。 */
-    public String text(String path) {
-        try {
-            ResponseEntity<String> resp = restTemplate.getForEntity(baseUrl + path, String.class);
-            return resp.getBody();
-        } catch (Exception e) {
-            logger.warn("取文本 {} 失败：{}", path, e.getMessage());
-            return null;
-        }
-    }
-
     /** 取字节响应（CSV / 文件下载等二进制或大文本响应；返回 raw bytes）。 */
     public byte[] bytes(String path) {
         try {
@@ -287,9 +276,18 @@ public class AiClient {
             // HttpMessageNotWritableException（前端只看到 HTTP 500 + 空 body）。
             // 正确做法：自己吞掉，转成一条 SSE done 事件（unavailable 模式），
             // 让前端按既有逻辑回退到关键词推荐 / 本地规则。
-            logger.warn("SSE 流式转发失败，降级为不可用：{}", e.getMessage());
+            logger.warn("SSE 流式转发失败，降级为不可用：{}", e.getMessage(), e);
+            // 把真实异常类型和消息一并下发给前端。
+            //
+            // 之前这里只回一句「AI 服务不可用」，前端据此显示「AI 服务当前不可用」——
+            // 于是「连不上 8000」「8000 返回 500」「响应格式不对」三种完全不同的情况，
+            // 在界面上长得一模一样，只能靠人肉猜。加了 reason 之后，
+            // 排查时点一下「重新检测」就能看到确切原因，不用再翻后端日志。
+            String reason = e.getClass().getSimpleName() + ": " + String.valueOf(e.getMessage());
+            reason = reason.replace("\\", "\\\\").replace("\"", "\\\"");
             String json = "{\"success\":false,\"available\":false,\"mode\":\"unavailable\","
-                    + "\"message\":\"AI 服务不可用\"}";
+                    + "\"message\":\"AI 服务不可用\","
+                    + "\"reason\":\"" + reason + "\"}";
             String event = "event: error\n"
                     + "data: " + json + "\n\n";
             try {

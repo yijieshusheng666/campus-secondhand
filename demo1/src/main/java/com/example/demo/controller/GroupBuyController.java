@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.GroupBuy;
 import com.example.demo.entity.User;
@@ -46,13 +46,13 @@ public class GroupBuyController {
     @Autowired
     private UserRepository userRepository;
 
-    // 发起拼单（发起人自动成为第一个成员）
+    // 发起拼单（发起人自动成为第一个成员）。发起人取自 token，不再读 body 里的 initiatorId
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
         Long goodsId = RequestUtils.longOf(body, "goodsId");
-        Long initiatorId = RequestUtils.longOf(body, "initiatorId");
-        if (goodsId == null || initiatorId == null) {
+        Long initiatorId = AuthContext.requireUserId();
+        if (goodsId == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
         String building = RequestUtils.textOf(body, "building");
@@ -103,9 +103,10 @@ public class GroupBuyController {
         return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
-    // 我发起或参与的拼单
+    // 我发起或参与的拼单（口径固定为当前登录用户）
     @GetMapping
-    public ResponseEntity<?> mine(@RequestParam Long userId) {
+    public ResponseEntity<?> mine() {
+        Long userId = AuthContext.requireUserId();
         List<Map<String, Object>> items = new ArrayList<>();
         for (GroupBuy groupBuy : groupBuyRepository.findByStatusOrderByCreatedAtDesc(GroupBuy.STATUS_OPEN)) {
             if (groupBuy.getMemberIds().contains(userId)) {
@@ -130,10 +131,7 @@ public class GroupBuyController {
         if (groupBuy == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("拼单不存在"));
         }
-        Long userId = RequestUtils.longOf(body, "userId");
-        if (userId == null) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
-        }
+        Long userId = AuthContext.requireUserId();
         if (!GroupBuy.STATUS_OPEN.equals(groupBuy.getStatus())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail(
                     "该拼单已" + groupBuy.getStatus() + "，不能加入了"));
@@ -175,8 +173,8 @@ public class GroupBuyController {
         if (groupBuy == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("拼单不存在"));
         }
-        Long userId = RequestUtils.longOf(body, "userId");
-        if (userId == null || !groupBuy.getMemberIds().contains(userId)) {
+        Long userId = AuthContext.requireUserId();
+        if (!groupBuy.getMemberIds().contains(userId)) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("你不在这个拼单里"));
         }
         if (GroupBuy.STATUS_DONE.equals(groupBuy.getStatus())) {

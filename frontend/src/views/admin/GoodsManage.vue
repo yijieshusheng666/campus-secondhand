@@ -11,6 +11,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../api'
+import { CATEGORY_NAMES } from '../../constants/goods'
 
 const goods = ref([])
 const loading = ref(false)
@@ -21,7 +22,7 @@ const selected = ref([])
 const detailVisible = ref(false)
 const detailRow = ref(null)
 
-const CATEGORIES = ['电子产品', '图书教材', '生活用品', '运动户外', '二手家具', '美妆个护']
+const CATEGORIES = CATEGORY_NAMES
 const STATUSES = ['在售', '已售出', '已下架']
 
 async function load() {

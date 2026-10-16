@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Barter;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.User;
@@ -46,13 +46,13 @@ public class BarterController {
     @Autowired
     private UserRepository userRepository;
 
-    // 发起换物请求
+    // 发起换物请求。发起人取自 token：以前读 body 里的 requesterId，谁传谁的 id 就能以别人名义发起
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
         Long goodsId = RequestUtils.longOf(body, "goodsId");
-        Long requesterId = RequestUtils.longOf(body, "requesterId");
-        if (goodsId == null || requesterId == null) {
+        Long requesterId = AuthContext.requireUserId();
+        if (goodsId == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
         }
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
@@ -94,9 +94,10 @@ public class BarterController {
         return ResponseEntity.ok(ApiResponses.ok("换物请求已发出，等对方回应", extras));
     }
 
-    // 我发起的 + 我收到的
+    // 我发起的 + 我收到的（口径固定为当前登录用户，不接受外部指定 userId）
     @GetMapping
-    public ResponseEntity<?> list(@RequestParam Long userId) {
+    public ResponseEntity<?> list() {
+        Long userId = AuthContext.requireUserId();
         List<Map<String, Object>> sent = new ArrayList<>();
         for (Barter barter : barterRepository.findByRequesterIdOrderByCreatedAtDesc(userId)) {
             sent.add(view(barter));
@@ -119,8 +120,8 @@ public class BarterController {
         if (barter == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("换物请求不存在"));
         }
-        Long userId = RequestUtils.longOf(body, "userId");
-        if (userId == null || !userId.equals(barter.getOwnerId())) {
+        Long userId = AuthContext.requireUserId();
+        if (!userId.equals(barter.getOwnerId())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("只有宝贝的主人可以回应换物请求"));
         }
         if (!Barter.STATUS_PENDING.equals(barter.getStatus())) {

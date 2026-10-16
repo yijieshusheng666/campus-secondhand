@@ -73,6 +73,14 @@
             <version>2.0.52</version>
         </dependency>
 
+        <!-- 只为了 BCryptPasswordEncoder。刻意不用 spring-boot-starter-security：
+             那会自动装配一整条过滤器链，和本项目「自己写拦截器做鉴权」的方案打架，
+             也会把公开接口一并拦掉。版本由 Spring Boot 父 POM 管理。 -->
+        <dependency>
+            <groupId>org.springframework.security</groupId>
+            <artifactId>spring-security-crypto</artifactId>
+        </dependency>
+
         <!-- 测试依赖 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

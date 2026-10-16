@@ -107,6 +107,30 @@ public final class OrderStateMachine {
         labels.put(key(DISPUTED, REFUNDED), "裁定：支持买家退款");
         labels.put(key(DISPUTED, FINISHED), "裁定：驳回诉求并放款");
         LABEL_OF = labels;
+
+        // 一致性自检：TRANSITIONS 里的每一对流转，都必须同时有「操作方」与「按钮文案」；
+        // 每个状态都必须有对应的资金状态。
+        // 少了这道检查，以后往 TRANSITIONS 加一条流转却忘了同步 ACTOR_OF，
+        // actorOf 会返回空串，订单接口里那两个 if 一个都不进 —— 该流转就变成任何人可发起。
+        // 在一个带资金语义的状态机里这是最危险的默认值，宁可启动即失败也不要静默放行。
+        for (Map.Entry<String, Set<String>> entry : TRANSITIONS.entrySet()) {
+            for (String to : entry.getValue()) {
+                String pair = key(entry.getKey(), to);
+                require(ACTOR_OF.containsKey(pair), "状态机缺少操作方定义：" + pair);
+                require(LABEL_OF.containsKey(pair), "状态机缺少按钮文案：" + pair);
+            }
+        }
+        for (String status : TRANSITIONS.keySet()) {
+            require(ESCROW_OF.containsKey(status), "状态机缺少资金状态：" + status);
+        }
+    }
+
+    /** 启动期自检用；只在静态初始化里调用，不满足就中止启动。 */
+    private static void require(boolean ok, String message) {
+        if (!ok) {
+            throw new IllegalStateException(
+                    message + "（请同步维护 TRANSITIONS / ESCROW_OF / ACTOR_OF / LABEL_OF）");
+        }
     }
 
     private OrderStateMachine() {
@@ -129,7 +153,13 @@ public final class OrderStateMachine {
         return TRANSITIONS.getOrDefault(from, Set.of());
     }
 
-    /** 该流转应由谁发起：buyer / seller；非法流转返回空串。 */
+    /**
+     * 该流转应由谁发起：{@code buyer / seller / admin}。
+     *
+     * <p><b>非法流转返回空串，调用方必须把空串当成「拒绝」而不是「不校验」。</b>
+     * 静态初始化里的自检保证了合法流转一定有操作方定义，所以空串只可能来自
+     * 「本来就不是合法流转」——那种情况下放行等于给出一个任意人可触发的资金操作。</p>
+     */
     public static String actorOf(String from, String to) {
         return ACTOR_OF.getOrDefault(key(from, to), "");
     }

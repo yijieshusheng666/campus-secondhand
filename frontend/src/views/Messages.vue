@@ -3,7 +3,7 @@ import { ref, onMounted, onUnmounted, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
-import request from '../api'
+import request, { AI_TIMEOUT } from '../api'
 import { useCurrentUser } from '../composables/useCurrentUser'
 
 const route = useRoute()
@@ -48,7 +48,7 @@ function scrollToBottom() {
 }
 
 async function loadConversations() {
-  if (!user) return
+  if (!user.value) return
   try {
     const { data } = await api.get('/messages/conversations', { params: { userId: user.value.id } })
     conversations.value = data
@@ -131,7 +131,7 @@ async function resolveFromQuery() {
 async function sendMessage() {
   const text = input.value.trim()
   if (!text || !active.value) return
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     return
   }
@@ -180,7 +180,7 @@ async function doSummarize() {
       messages: currentTranscript(),
       goodsTitle: goods?.title || active.value.goodsTitle || '',
       goodsPrice: goods?.price ?? null
-    })
+    }, { timeout: AI_TIMEOUT })
     if (!data.available) {
       ElMessage.error('AI 服务未启动，摘要暂时不可用')
       assistVisible.value = false
@@ -210,7 +210,7 @@ async function doNegotiate() {
       goodsTitle: goods?.title || active.value.goodsTitle || '',
       goodsPrice: goods?.price ?? null,
       description: goods?.description || ''
-    })
+    }, { timeout: AI_TIMEOUT })
     if (!data.available) {
       ElMessage.error('AI 服务未启动，话术暂时不可用')
       assistVisible.value = false
@@ -240,7 +240,7 @@ function modeText(mode) {
 }
 
 onMounted(async () => {
-  if (!user) return
+  if (!user.value) return
   await loadConversations()
   await resolveFromQuery()
   // 轮询刷新，模拟实时对话（演示用，无需 WebSocket）
@@ -284,7 +284,7 @@ onUnmounted(() => {
               <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
               <!-- 点卡片直接回首页看这件宝贝的详情 -->
               <div class="chat-goods-card" :class="{ empty: !active.goodsId }" @click="goGoods">
-                <img  loading="lazy"v-if="activeGoods?.images?.length" class="cg-img" :src="activeGoods.images[0].imageUrl" alt="宝贝">
+                <img  loading="lazy" v-if="activeGoods?.images?.length" class="cg-img" :src="activeGoods.images[0].imageUrl" alt="宝贝">
                 <div v-else class="cg-img cg-img-empty">🎁</div>
                 <div class="cg-body">
                   <div class="cg-title">{{ active.goodsTitle || '（商品信息缺失）' }}</div>

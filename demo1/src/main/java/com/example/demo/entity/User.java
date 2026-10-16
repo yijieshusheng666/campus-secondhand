@@ -6,7 +6,10 @@ import jakarta.persistence.*;
 import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users",
+       // 登录与注册都按 stuid 查，之前是全表扫；唯一约束顺带堵住
+       // 「同一学号并发注册写入两行」——那个竞态原本只靠应用层 check-then-insert 挡着
+       uniqueConstraints = @UniqueConstraint(name = "uk_users_stuid", columnNames = "stuid"))
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class User {
     @Id

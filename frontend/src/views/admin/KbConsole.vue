@@ -15,6 +15,10 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../api'
 
+// 重建索引要重算全部条目的向量，是最慢的一个接口（条数多时可达分钟级），
+// 默认 10s 必然超时，这里单独给足。
+const REINDEX_TIMEOUT = 300000
+
 // ⚠️ 两套路径，别混用：
 //   OPS     —— 给 axios 用。api.js 里 axios 实例已经配了 baseURL: '/api'，
 //              这里再写 '/api' 前缀，实际请求就变成 /api/api/ai/ops/... → 404。
@@ -195,7 +199,7 @@ async function remove(row) {
 
 async function reindex() {
   try {
-    const { data } = await request.post(`${OPS}/kb/reindex`)
+    const { data } = await request.post(`${OPS}/kb/reindex`, null, { timeout: REINDEX_TIMEOUT })
     if (data.success) ElMessage.success(data.message || '索引已重建')
     else ElMessage.error(data.message || '重建失败')
   } catch (e) { /* 已提示 */ }

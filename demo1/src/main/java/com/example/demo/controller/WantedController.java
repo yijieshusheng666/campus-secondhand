@@ -17,6 +17,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.User;
 import com.example.demo.entity.Wanted;
@@ -49,14 +50,11 @@ public class WantedController {
     @Autowired
     private WantedMatchService matchService;
 
-    // 发布求购：返回时顺带把首轮匹配结果带上，让"撮合"当场可见
+    // 发布求购：返回时顺带把首轮匹配结果带上，让"撮合"当场可见。发布人取自 token
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        Long userId = RequestUtils.longOf(body, "userId");
-        if (userId == null) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("请先登录"));
-        }
+        Long userId = AuthContext.requireUserId();
         String title = RequestUtils.textOf(body, "title");
         if (title.isEmpty()) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("请填写想求购什么"));
@@ -100,9 +98,10 @@ public class WantedController {
         return ResponseEntity.ok(ApiResponses.ok(msg, extras));
     }
 
-    // 我的求购
+    // 我的求购（口径固定为当前登录用户）
     @GetMapping
-    public ResponseEntity<?> mine(@RequestParam Long userId) {
+    public ResponseEntity<?> mine() {
+        Long userId = AuthContext.requireUserId();
         List<Map<String, Object>> items = new ArrayList<>();
         for (Wanted wanted : wantedRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
             items.add(view(wanted));
@@ -149,8 +148,9 @@ public class WantedController {
         if (wanted == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("求购不存在"));
         }
-        Long userId = RequestUtils.longOf(body, "userId");
-        if (userId == null || !userId.equals(wanted.getUserId())) {
+        // 关闭人取自 token：从前读 body 里的 userId，等于可以关掉别人发布的求购
+        Long userId = AuthContext.requireUserId();
+        if (!userId.equals(wanted.getUserId())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("只能关闭自己发布的求购"));
         }
         if (Wanted.STATUS_CLOSED.equals(wanted.getStatus())) {

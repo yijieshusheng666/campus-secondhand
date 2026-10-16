@@ -210,6 +210,19 @@ def test_chat_structured_steps_for_how_to(client):
     assert "第1步" in body["answer"], "操作指引类应分点输出"
 
 
+def test_shard_restricted_search_falls_back_to_full_scan(client):
+    """意图命中的分片里一条都查不到时，必须放开全量再查一次。
+
+    「校园卡可以卖吗」被判为「禁售」意图、只放行 rules/faq 分片，而答案 C009
+    落在 campus 分片 —— 没有这层兜底时，库里明明收录了却走拒答。
+    """
+    from app.deps import knowledge
+
+    hits, trace = knowledge.search("校园卡可以卖吗", top_k=3)
+    assert trace.get("shard_fallback") is True, "受限分片召回为空时未触发全量兜底"
+    assert any(h.id == "C009" for h in hits), "放开分片后应召回校园卡那条"
+
+
 # ---------------- SSE ----------------
 
 
@@ -237,6 +250,79 @@ def test_sse_stream_emits_meta_delta_done(client):
 def test_sse_stream_refuses_out_of_scope(client):
     resp = client.post("/ai/chat/stream", json={"question": "量子计算机怎么组装"})
     assert "refused" in resp.text
+
+
+def test_sse_stream_delta_concat_equals_done_answer(client):
+    """事件契约：done.answer 必须等于所有 delta 的拼接（前端靠它兜底补正文）。"""
+    import json
+
+    resp = client.post("/ai/chat/stream", json={"question": "怎么退款"})
+    events = [json.loads(line.strip()[5:]) for line in resp.text.splitlines()
+              if line.strip().startswith("data:")]
+    deltas = "".join(e["text"] for e in events if e["event"] == "delta")
+    assert deltas, "应推送文本增量"
+    assert events[-1]["event"] == "done"
+    assert deltas == events[-1]["answer"]
+
+
+def test_sse_stream_midway_llm_failure_replaces_body(client, monkeypatch):
+    """模型吐了一半又断流：发带替代正文的 error，不能把半截文本和整段答案叠在一起。
+
+    早期实现的缺陷：except 分支把 answer 整体覆盖成抽取式答案后又整段推一遍，
+    用户看到「半截模型文本 + 完整抽取式答案」粘在一起；且 done.answer 只等于后者、
+    不等于 delta 拼接，违反 chat_stream 开头声明的事件契约。
+    """
+    import json
+
+    from app.llm import LLMUnavailable
+    from app.routers import chat_stream
+
+    def fake_stream(prompt):
+        yield "退款需要先"
+        yield "联系卖家"            # 这两段已经推给前端了，收不回来
+        raise LLMUnavailable("连接中断")
+
+    monkeypatch.setattr(chat_stream.llm, "stream", fake_stream)
+
+    resp = client.post("/ai/chat/stream", json={"question": "怎么退款"})
+    events = [json.loads(line.strip()[5:]) for line in resp.text.splitlines()
+              if line.strip().startswith("data:")]
+    kinds = [e["event"] for e in events]
+
+    assert "error" in kinds, "中途断流必须发 error"
+    err = next(e for e in events if e["event"] == "error")
+    assert err.get("text"), "error 必须带替代正文，否则前端只剩兜底文案、丢掉可用的抽取式答案"
+
+    done = events[-1]
+    assert done["event"] == "done"
+    assert done["answer"] == err["text"], "done.answer 应与 error 的替代正文一致"
+    assert "退款需要先" not in done["answer"], "半截模型文本不能残留进最终答案"
+    assert "delta" not in kinds[kinds.index("error"):], \
+        "error 之后不能再补 delta（会粘在替换正文后面）"
+
+
+def test_chat_rejects_overlong_question(client):
+    """超长输入必须被挡在 422，而不是照单全收地送去分词/检索/模型。
+
+    问题文本会全量流经 jieba → BM25 → embedding → LLM，没有上限时一个请求
+    就能把 CPU 与 token 额度吃光。
+    """
+    from app.routers.chat import MAX_QUESTION_LEN
+
+    ok = client.post("/ai/chat", json={"question": "退款" * MAX_QUESTION_LEN})
+    assert ok.status_code == 422
+
+    stream = client.post("/ai/chat/stream", json={"question": "退" * (MAX_QUESTION_LEN + 1)})
+    assert stream.status_code == 422
+
+
+def test_chat_rejects_too_many_history_turns(client):
+    """超量历史同样要挡：每一条都会被拼进提示词。"""
+    from app.routers.chat import MAX_HISTORY_ITEMS
+
+    history = [{"role": "user", "content": "在吗"} for _ in range(MAX_HISTORY_ITEMS + 1)]
+    resp = client.post("/ai/chat", json={"question": "怎么退款", "history": history})
+    assert resp.status_code == 422
 
 
 # ---------------- 运营端 ----------------

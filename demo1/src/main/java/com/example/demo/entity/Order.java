@@ -9,7 +9,11 @@ import java.util.List;
 import java.util.Map;
 
 @Entity
-@Table(name = "orders")
+@Table(name = "orders", indexes = {
+        @Index(name = "idx_orders_buyer", columnList = "buyer_id"),
+        @Index(name = "idx_orders_seller", columnList = "seller_id"),
+        @Index(name = "idx_orders_status", columnList = "status")
+})
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Order {
     @Id

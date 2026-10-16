@@ -29,8 +29,9 @@ async function onLogin() {
       ElMessage.error(data.msg || data.message || '登录失败')
       return
     }
-    // 写进共享会话对象（同时落 localStorage），导航栏立刻显示新登录的用户和头像
-    setUser(data.user)
+    // 写进共享会话对象（同时落 localStorage），导航栏立刻显示新登录的用户和头像。
+    // token 必须一起存：之后所有需要身份的请求都靠它，缺了它后端会一律判为未登录。
+    setUser(data.user, data.token)
     ElMessage.success('登录成功')
     router.push('/')
   } catch {

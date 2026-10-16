@@ -7,6 +7,7 @@ import request from '../api'
 import { clearPersonalContext } from '../composables/usePersonalContext'
 import ReviewDialog from '../components/ReviewDialog.vue'
 import { statusIcon, escrowIcon, actionIcon } from '../icons'
+import { escrowTag, statusTag } from '../constants/order'
 import { AVATARS, avatarUrl } from '../avatars'
 import { currentUser as user, patchUser, setUser } from '../session'
 
@@ -49,7 +50,8 @@ const verifying = ref(false)
 async function loadVerifyStatus() {
   if (!user.value) return
   try {
-    const { data } = await api.get(`/users/${user.value.id}`)
+    // silent：拿不到认证状态不影响页面其他部分，不该为此弹错误提示
+    const { data } = await api.get(`/users/${user.value.id}`, { silent: true })
     verified.value = !!data.verified
     realNameMasked.value = data.realNameMasked || ''
   } catch (e) {
@@ -64,7 +66,8 @@ const reviews = ref([])
 async function loadReviews() {
   if (!user.value) return
   try {
-    const { data } = await api.get('/reviews', { params: { userId: user.value.id } })
+    // silent：同上，评价加载失败不影响页面其他部分
+    const { data } = await api.get('/reviews', { params: { userId: user.value.id }, silent: true })
     reviews.value = data.data || []
     // 我发出的评价：用来判断某个已完成订单还能不能评价买家
     reviewedOrderIds.value = new Set((data.sent || []).map(r => r.orderId))
@@ -122,17 +125,7 @@ async function submitVerify() {
   }
 }
 
-const statusTag = {
-  '待付款': 'danger',
-  '待发货': 'warning',
-  '已发货': 'primary',
-  '已完成': 'success',
-  '退款中': 'info',
-  '已退款': 'info',
-  '已取消': 'info',
-  '仲裁中': 'warning'
-}
-
+// statusTag / escrowTag 来自 src/constants/order.js，不要再本地抄一份
 function formatTime(t) {
   if (!t) return ''
   return String(t).replace('T', ' ').slice(0, 19)
@@ -261,7 +254,8 @@ async function batchDelete() {
   let successCount = 0
   for (const id of selectedIds.value) {
     try {
-      const { data } = await api.delete(`/goods/${id}`)
+      // silent：批量删除里单条失败只跳过（下面 catch 已注明），不该每条弹一次
+      const { data } = await api.delete(`/goods/${id}`, { silent: true })
       if (data.success) successCount++
     } catch { /* 忽略单个失败 */ }
   }
@@ -277,7 +271,9 @@ async function batchDelete() {
 async function loadSales() {
   if (!user.value) return
   try {
-    const { data } = await api.get('/orders', { params: { userId: user.value.id, role: 'seller' } })
+    // silent：下面 catch 里已有更具体的中文提示
+    const { data } = await api.get('/orders',
+      { params: { userId: user.value.id, role: 'seller' }, silent: true })
     sales.value = data
   } catch (e) {
     ElMessage.error('售出记录加载失败')
@@ -488,12 +484,12 @@ onMounted(() => {
           <div class="sale-header">
             <span class="sale-buyer">买家：{{ order.buyerName }}</span>
             <div class="sale-tags">
-              <el-tag size="small" type="warning">
-                <img  loading="lazy"v-if="escrowIcon(order.escrowStatus)" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
+              <el-tag size="small" :type="escrowTag[order.escrowStatus] || 'info'">
+                <img v-if="escrowIcon(order.escrowStatus)" loading="lazy" class="tag-icon" :src="escrowIcon(order.escrowStatus)" alt="">
                 资金：{{ order.escrowStatus || '—' }}
               </el-tag>
               <el-tag size="small" :type="statusTag[order.status] || 'info'">
-                <img  loading="lazy"v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
+                <img  loading="lazy" v-if="statusIcon(order.status)" class="tag-icon" :src="statusIcon(order.status)" alt="">
                 {{ order.status }}
               </el-tag>
             </div>
@@ -510,7 +506,7 @@ onMounted(() => {
             <el-button v-for="a in sellerActions(order)" :key="a.status" size="small"
               :type="a.status === '已退款' ? 'danger' : 'primary'" :plain="a.status === '已退款'"
               @click="handleSaleAction(order, a)">
-              <img  loading="lazy"v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
+              <img  loading="lazy" v-if="actionIcon(a.label)" class="btn-icon" :src="actionIcon(a.label)" alt="">{{ a.label }}
             </el-button>
           </div>
         </div>

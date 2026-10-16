@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
 import request from '../api'
+import { CATEGORIES } from '../constants/goods'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import { categoryIcon } from '../icons'
 
@@ -13,16 +14,8 @@ const router = useRouter()
 // 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
 const api = useApiRequest('操作失败，请检查后端服务')
 
-// 分类胶囊（图标见 icons.js；某个分类还没图时回退成这里的 emoji）
-const categories = [
-  { name: '全部', emoji: '✨' },
-  { name: '电子产品', emoji: '📱' },
-  { name: '图书教材', emoji: '📚' },
-  { name: '生活用品', emoji: '🧺' },
-  { name: '运动户外', emoji: '🏀' },
-  { name: '二手家具', emoji: '🪑' },
-  { name: '美妆护肤', emoji: '💄' }
-]
+// 分类胶囊（图标见 icons.js；某个分类还没图时回退成 CATEGORIES 里的 emoji）
+const categories = [{ name: '全部', emoji: '✨' }, ...CATEGORIES]
 
 const goodsList = ref([])
 const activeCategory = ref('全部')
@@ -44,10 +37,6 @@ const buyForm = ref({ receiver: '', phone: '', address: '' })
 const addresses = ref([])
 const selectedAddress = ref(null)
 
-function getImageUrl(path) {
-  if (!path) return ''
-  return path.startsWith('http') ? path : path
-}
 
 function formatTime(t) {
   if (!t) return ''
@@ -60,7 +49,8 @@ const goodsReviews = ref({ summary: { ...EMPTY_REVIEW_SUMMARY }, data: [] })
 
 async function loadGoodsReviews(goodsId) {
   try {
-    const { data } = await api.get(`/reviews/goods/${goodsId}`)
+    // silent：拿不到评价不影响详情展示，不该为此弹一条错误提示
+    const { data } = await api.get(`/reviews/goods/${goodsId}`, { silent: true })
     goodsReviews.value = {
       summary: data.summary || { ...EMPTY_REVIEW_SUMMARY },
       data: data.data || []
@@ -76,7 +66,8 @@ async function loadGoods() {
     const params = {}
     if (activeCategory.value !== '全部') params.category = activeCategory.value
     if (keyword.value.trim()) params.keyword = keyword.value.trim()
-    const { data } = await api.get('/goods', { params })
+    // silent：下面 catch 里已经有更具体的中文提示，不 silent 会弹两次
+    const { data } = await api.get('/goods', { params, silent: true })
     goodsList.value = data
   } catch (e) {
     ElMessage.error('宝贝加载失败，请检查后端服务')
@@ -113,7 +104,9 @@ async function doSearch() {
   try {
     const params = { keyword: kw, topK: 12 }
     if (activeCategory.value !== '全部') params.category = activeCategory.value
-    const { data } = await api.get('/ai/search', { params })
+    // silent：AI 服务不可用时本来就要静默回退关键词检索，
+    // 不 silent 的话每次回退都会弹一条「操作失败」，而功能其实正常
+    const { data } = await api.get('/ai/search', { params, silent: true })
     if (data.success && data.semantic && data.data.length > 0) {
       semanticHits = data.data
     }
@@ -153,7 +146,7 @@ async function showDetail(goods) {
 // 联系卖家：登录后才能聊，自己发布的宝贝不能聊自己
 function contactSeller(goods) {
   const user = useCurrentUser()
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
     return
@@ -173,7 +166,7 @@ function buyFromDetail() {
 
 function openBuy(goods) {
   const user = useCurrentUser()
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
     return
@@ -238,7 +231,7 @@ async function openFromQuery() {
   const goodsId = route.query.goodsId
   if (!goodsId) return
   try {
-    const { data } = await api.get(`/goods/${goodsId}`)
+    const { data } = await api.get(`/goods/${goodsId}`, { silent: true })
     if (data && data.id) {
       showDetail(data)
     }
@@ -267,7 +260,7 @@ async function openFromQuery() {
     <div class="cate-bar">
       <div v-for="c in categories" :key="c.name" class="cate-chip" :class="{ active: activeCategory === c.name }"
         @click="selectCategory(c.name)">
-        <img  loading="lazy"v-if="categoryIcon(c.name)" class="cate-icon" :src="categoryIcon(c.name)" :alt="c.name">
+        <img  loading="lazy" v-if="categoryIcon(c.name)" class="cate-icon" :src="categoryIcon(c.name)" :alt="c.name">
         <span v-else class="cate-emoji">{{ c.emoji }}</span>
         <span>{{ c.name }}</span>
       </div>
@@ -287,7 +280,7 @@ async function openFromQuery() {
         :description="keyword.trim() ? '没找到匹配的宝贝，换个说法试试' : '这个分类暂无宝贝，去看看别的吧'" />
       <div class="feed-grid">
         <div v-for="item in goodsList" :key="item.id" class="goods-card">
-          <img v-img-fallback  loading="lazy"class="gc-img" :src="getImageUrl(item.images?.[0]?.imageUrl)" alt="宝贝" @click="showDetail(item)">
+          <img v-img-fallback loading="lazy" class="gc-img" :src="item.images?.[0]?.imageUrl" alt="宝贝" @click="showDetail(item)">
           <div class="gc-body">
             <div class="gc-title" @click="showDetail(item)">{{ item.title }}</div>
             <div class="gc-tags">
@@ -310,7 +303,7 @@ async function openFromQuery() {
   <!-- 宝贝详情 -->
   <el-dialog v-model="detailVisible" title="宝贝详情" width="560px" round>
     <div v-if="detailGoods" class="detail">
-      <img v-img-fallback  loading="lazy"class="detail-img" :src="getImageUrl(detailGoods.images?.[0]?.imageUrl)" alt="宝贝">
+      <img v-img-fallback loading="lazy" class="detail-img" :src="detailGoods.images?.[0]?.imageUrl" alt="宝贝">
       <div class="detail-info">
         <div class="detail-price">¥<span>{{ detailGoods.price }}</span></div>
         <div class="detail-title">{{ detailGoods.title }}</div>
@@ -377,7 +370,7 @@ async function openFromQuery() {
   <!-- 确认订单 -->
   <el-dialog v-model="buyVisible" title="确认订单" width="520px">
     <div v-if="buyGoods" class="order-goods">
-      <img v-img-fallback  loading="lazy" :src="getImageUrl(buyGoods.images?.[0]?.imageUrl)" alt="宝贝">
+      <img v-img-fallback loading="lazy" :src="buyGoods.images?.[0]?.imageUrl" alt="宝贝">
       <div class="order-goods-info">
         <div class="order-goods-title">{{ buyGoods.title }}</div>
         <div class="order-goods-price">¥{{ buyGoods.price }}</div>

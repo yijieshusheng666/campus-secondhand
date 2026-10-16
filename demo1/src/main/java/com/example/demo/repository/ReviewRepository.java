@@ -15,7 +15,6 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     /** 我发出的评价（用于个人中心展示） */
     List<Review> findByReviewerIdOrderByCreatedAtDesc(Long reviewerId);
 
-    List<Review> findByOrderId(Long orderId);
 
     /** 某件商品收到的评价：商品详情页展示评分与评价列表用 */
     List<Review> findByGoodsIdOrderByCreatedAtDesc(Long goodsId);

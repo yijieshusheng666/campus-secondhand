@@ -122,6 +122,48 @@ class HybridRetriever:
         if not queries:
             return [], trace
 
+        candidates = self._dual_channel(queries, allowed, trace)
+
+        # 兜底：分片受限时若一条都召回不到，放开全量再找一次。
+        # 少了这层，「校园卡可以卖吗」会因为「禁售」意图只放行 rules/faq 分片、而答案
+        # C009 落在 campus 分片，于是库里明明收录了却走拒答（实测 BM25 不限分片时 C009
+        # 得分 7.09，是强命中）。
+        # 只有放开后确实找到了「过线的」东西才采纳：库外问题（如「量子纠缠退相干」）
+        # 放开后会召回到 0.2 左右的噪声，那种情况仍应保持拒答，不能把噪声挂上去。
+        # 门槛用 refuse_threshold —— 它就是本项目对「算不算找到了答案」的定义。
+        if not candidates and allowed is not None:
+            probe: dict = {}
+            widened = self._dual_channel(queries, None, probe)
+            if widened and max(h.confidence for h in widened) >= settings.refuse_threshold:
+                trace["shard_fallback"] = True
+                trace.update(probe)   # 仅采纳时才把放开检索的链路写回 trace
+                candidates = widened
+
+        # 重排：按置信度排序后，砍掉明显低分的尾部（相对分裁剪，跨模式都成立）
+        candidates.sort(key=lambda h: (-h.confidence, h.id))
+        if candidates:
+            floor = candidates[0].confidence * settings.rerank_min_ratio
+            kept = []
+            for hit in candidates:
+                if kept and hit.confidence < floor:
+                    trace["dropped_by_rerank"].append(
+                        {"id": hit.id, "title": hit.title, "confidence": hit.confidence})
+                    continue
+                kept.append(hit)
+                if len(kept) >= settings.max_hits:
+                    break
+            candidates = kept
+
+        trace["fused"] = [(h.id, h.confidence) for h in candidates[:5]]
+        return candidates[:top_k], trace
+
+    def _dual_channel(self, queries: list[str], allowed: set[str] | None,
+                      trace: dict) -> list[Hit]:
+        """两路召回（BM25 稀疏 + 向量稠密）→ RRF 融合 → 组装候选。
+
+        allowed 为 None 表示不限分片；否则两路都只在给定 id 集合内取，用于意图/季节
+        分片的优先召回。调用方负责在一条都没召回时用 None 重试一次。
+        """
         # 通道一：BM25 稀疏
         bm25_pool: dict[str, dict] = {}
         for query in queries:
@@ -213,23 +255,7 @@ class HybridRetriever:
             hit.evidence = self._evidence(hit)
             candidates.append(hit)
 
-        # 重排：按置信度排序后，砍掉明显低分的尾部（相对分裁剪，跨模式都成立）
-        candidates.sort(key=lambda h: (-h.confidence, h.id))
-        if candidates:
-            floor = candidates[0].confidence * settings.rerank_min_ratio
-            kept = []
-            for hit in candidates:
-                if kept and hit.confidence < floor:
-                    trace["dropped_by_rerank"].append(
-                        {"id": hit.id, "title": hit.title, "confidence": hit.confidence})
-                    continue
-                kept.append(hit)
-                if len(kept) >= settings.max_hits:
-                    break
-            candidates = kept
-
-        trace["fused"] = [(h.id, h.confidence) for h in candidates[:5]]
-        return candidates[:top_k], trace
+        return candidates
 
     # ---- 辅助 ----
 

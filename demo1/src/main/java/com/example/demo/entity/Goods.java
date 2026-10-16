@@ -1,6 +1,5 @@
 package com.example.demo.entity;
 
-import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import jakarta.persistence.*;
 import java.math.BigDecimal;
@@ -9,7 +8,11 @@ import java.util.List;
 
 
 @Entity
-@Table(name = "goods")
+@Table(name = "goods", indexes = {
+        @Index(name = "idx_goods_user", columnList = "user_id"),
+        @Index(name = "idx_goods_status", columnList = "status"),
+        @Index(name = "idx_goods_category", columnList = "category")
+})
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Goods {
     @Id
@@ -39,11 +42,6 @@ public class Goods {
 
     @OneToMany(mappedBy = "goods", cascade = CascadeType.ALL, fetch = FetchType.EAGER)
     private List<GoodsImage> images;
-    
-    @ManyToOne
-    @JoinColumn(name = "user_id", insertable = false, updatable = false)
-    @JsonIgnore
-    private User user;
 
     public Long getId() {
         return id;

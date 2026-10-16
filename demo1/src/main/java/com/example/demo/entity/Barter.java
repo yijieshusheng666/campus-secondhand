@@ -9,7 +9,10 @@ import java.time.LocalDateTime;
  * 平台不涉及资金，双方同意后自行沟通交接。
  */
 @Entity
-@Table(name = "barters")
+@Table(name = "barters", indexes = {
+        @Index(name = "idx_barters_owner", columnList = "owner_id"),
+        @Index(name = "idx_barters_requester", columnList = "requester_id")
+})
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Barter {
 

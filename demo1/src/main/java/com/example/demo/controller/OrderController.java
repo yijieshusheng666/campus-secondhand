@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.Order;
 import com.example.demo.entity.User;
@@ -39,12 +40,12 @@ public class OrderController {
     @Autowired
     private UserRepository userRepository;
 
-    // 创建订单：保存订单快照并把商品标记为已售
+    // 创建订单：保存订单快照并把商品标记为已售。买家取自 token，不再读 body 里的 buyerId
     @PostMapping
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
         Long goodsId = RequestUtils.longOf(body, "goodsId");
-        Long buyerId = RequestUtils.longOf(body, "buyerId");
-        if (goodsId == null || buyerId == null) {
+        Long buyerId = AuthContext.requireUserId();
+        if (goodsId == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("缺少商品或买家标识"));
         }
         String receiver = RequestUtils.textOf(body, "receiver");
@@ -57,6 +58,10 @@ public class OrderController {
         Goods goods = goodsRepository.findById(goodsId).orElse(null);
         if (goods == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("商品不存在"));
+        }
+        // 买家不能给自己的商品下单。买家身份现在来自 token，这条校验才真正拦得住人
+        if (buyerId.equals(goods.getUserId())) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail("不能给自己的商品下单"));
         }
         if ("已售".equals(goods.getStatus())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("商品已售出"));
@@ -87,9 +92,10 @@ public class OrderController {
                 "下单成功，请完成付款，货款将由平台托管", extras));
     }
 
-    // 查询订单：role=buyer 我买到的，role=seller 我卖出的
+    // 查询订单：role=buyer 我买到的，role=seller 我卖出的（"我"固定为当前登录用户）
     @GetMapping
-    public List<Order> list(@RequestParam Long userId, @RequestParam(defaultValue = "buyer") String role) {
+    public List<Order> list(@RequestParam(defaultValue = "buyer") String role) {
+        Long userId = AuthContext.requireUserId();
         if ("seller".equals(role)) {
             return orderRepository.findBySellerIdOrderByCreatedAtDesc(userId);
         }
@@ -123,16 +129,30 @@ public class OrderController {
                             + OrderStateMachine.describeNext(current)));
         }
 
-        Long actorId = RequestUtils.longOf(body, "userId");
-        if (actorId == null) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少操作人 userId"));
-        }
+        // 操作人取自 token：以前读 body 里的 userId，任意人传买卖双方的 id 就能推进别人的订单
+        Long actorId = AuthContext.requireUserId();
+        // 状态机声明该流转由谁发起，就必须由谁发起 —— 认不出来一律拒绝，不做「不认识就放行」。
+        // 这里曾经只处理 buyer/seller 两种情况，而「仲裁中 → 已退款 / 已完成」的操作方是
+        // admin，两个 if 都不进，结果任何登录用户都能直接裁定一笔纠纷、决定货款退给谁。
         String required = OrderStateMachine.actorOf(current, target);
+        if (required.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "该流转未定义操作方，已拒绝：" + current + "→" + target));
+        }
         if (OrderStateMachine.ACTOR_BUYER.equals(required) && !actorId.equals(order.getBuyerId())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("该操作只能由买家发起"));
         }
         if (OrderStateMachine.ACTOR_SELLER.equals(required) && !actorId.equals(order.getSellerId())) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("该操作只能由卖家发起"));
+        }
+        if (!OrderStateMachine.ACTOR_BUYER.equals(required)
+                && !OrderStateMachine.ACTOR_SELLER.equals(required)
+                && !OrderStateMachine.ACTOR_ADMIN.equals(required)) {
+            return ResponseEntity.badRequest().body(ApiResponses.fail(
+                    "未知的操作方定义，已拒绝：" + required));
+        }
+        if (OrderStateMachine.ACTOR_ADMIN.equals(required) && !AuthContext.isAdmin()) {
+            return ResponseEntity.status(403).body(ApiResponses.fail("该操作只能由平台管理员发起"));
         }
 
         order.setStatus(target);

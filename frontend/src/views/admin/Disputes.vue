@@ -102,11 +102,11 @@ onMounted(loadDisputes)
         <div class="dispute-actions">
           <el-button type="danger" :loading="submitting === d.id"
             @click="rule(d, '支持买家')">
-            <img  loading="lazy"v-if="ruleIcon('支持买家')" class="btn-icon" :src="ruleIcon('支持买家')" alt="">支持买家 · 退款
+            <img  loading="lazy" v-if="ruleIcon('支持买家')" class="btn-icon" :src="ruleIcon('支持买家')" alt="">支持买家 · 退款
           </el-button>
           <el-button type="primary" :loading="submitting === d.id"
             @click="rule(d, '驳回买家')">
-            <img  loading="lazy"v-if="ruleIcon('驳回买家')" class="btn-icon" :src="ruleIcon('驳回买家')" alt="">驳回诉求 · 放款给卖家
+            <img  loading="lazy" v-if="ruleIcon('驳回买家')" class="btn-icon" :src="ruleIcon('驳回买家')" alt="">驳回诉求 · 放款给卖家
           </el-button>
         </div>
       </div>

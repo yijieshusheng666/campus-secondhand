@@ -3,7 +3,8 @@ import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
-import request from '../api'
+import request, { AI_TIMEOUT } from '../api'
+import { CATEGORY_NAMES } from '../constants/goods'
 import { useCurrentUser } from '../composables/useCurrentUser'
 
 const router = useRouter()
@@ -11,7 +12,7 @@ const router = useRouter()
 // 统一错误提示口径：网络/HTTP 错误由 useApiRequest 自动 ElMessage.error 并抛异常
 const api = useApiRequest('操作失败，请检查后端服务')
 
-const categories = ['电子产品', '图书教材', '生活用品', '运动户外', '二手家具', '美妆护肤']
+const categories = CATEGORY_NAMES
 const form = reactive({ title: '', category: '电子产品', price: null, description: '' })
 const fileList = ref([])
 const uploadRef = ref(null)
@@ -73,7 +74,8 @@ async function recognizeImage() {
   recognizing.value = true
   try {
     const image = await fileToBase64(raw)
-    const { data } = await api.post('/ai/vision', { image, mime: raw.type || 'image/jpeg' })
+    const { data } = await api.post('/ai/vision', { image, mime: raw.type || 'image/jpeg' },
+      { timeout: AI_TIMEOUT, silent: true })
     if (!data.available) {
       ElMessage.info({ message: data.message || '图片识别暂不可用', duration: 4000 })
       return
@@ -93,9 +95,11 @@ async function recognizeImage() {
 // A6：发布前先过一遍内容风控，block 直接拦下，warn 让用户确认
 async function checkContent() {
   try {
+    // silent：风控服务不可用时按设计不阻塞发布（下面直接 return null），
+    // 弹一条错误提示会让用户以为发布失败
     const { data } = await api.post('/ai/moderate', {
       title: form.title, description: form.description
-    })
+    }, { timeout: AI_TIMEOUT, silent: true })
     return data
   } catch (e) {
     return null   // 风控服务不可用时不阻塞发布，后端还有兜底
@@ -104,7 +108,7 @@ async function checkContent() {
 
 onMounted(() => {
   const user = useCurrentUser()
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
   }
@@ -122,12 +126,15 @@ function onExceed() {
 }
 
 async function onPublish() {
-  if (!form.title.trim() || !form.price || !form.description.trim()) {
+  // 价格必须显式判空，不能写 !form.price：输入框是 :min="0"（允许填 0 表示赠送），
+  // 而 !0 为真，会把「0 元赠送」误判成「没填价格」直接拦下。
+  const priceMissing = form.price === null || form.price === undefined || form.price === ''
+  if (!form.title.trim() || priceMissing || !form.description.trim()) {
     ElMessage.warning('请填写完整信息')
     return
   }
   const user = useCurrentUser()
-  if (!user) {
+  if (!user.value) {
     ElMessage.warning('请先登录')
     setTimeout(() => router.push('/login'), 800)
     return

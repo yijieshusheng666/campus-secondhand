@@ -3,7 +3,12 @@
 事件协议：
     data: {"event":"meta",  ...}   检索完成后的元信息（traceId / 置信度 / 是否拒答 / 来源）
     data: {"event":"delta", "text":"..."}  文本增量
+    data: {"event":"error", "text":"..."}  正文作废，text 为替代正文（可缺省）
     data: {"event":"done",  ...}   结束事件（带完整答案与统计）
+
+契约：`done.answer` 等于所有 `delta` 的拼接。唯一的例外是「模型流到一半中断」——
+此时已推出去的 delta 收不回来，后端改发一条带 `text` 的 `error`，由前端整段替换，
+`done.answer` 与该 `text` 一致。
 
 配了 LLM 时是真流式（逐块转发模型增量）；没配 LLM 时走抽取式答案的
 分段推送，保证前端体验与协议一致。
@@ -21,7 +26,12 @@ from app.config import settings
 from app.deps import knowledge
 from app.llm import LLMUnavailable, llm
 from app.observability import record_event, trace_span
-from app.routers.chat import HistoryItem, _sources
+from app.routers.chat import (
+    MAX_HISTORY_ITEMS,
+    MAX_QUESTION_LEN,
+    HistoryItem,
+    _sources,
+)
 from app.prompts import (
     RAG_QA,
     REFUSAL_ANSWER,
@@ -40,6 +50,11 @@ router = APIRouter(prefix="/ai", tags=["chat"])
 CHUNK_SIZE = 12
 
 
+# personal_context 是前端按站内数据压出来的文本块（最多各 6 行商品/订单/求购），
+# 正常几 KB 以内；给足余量的同时设上限，避免被当成往 prompt 里灌垃圾的通道。
+MAX_PERSONAL_CONTEXT_LEN = 8000
+
+
 class StreamRequest(BaseModel):
     # 前端 / Java 侧一律用 camelCase，这里两种写法都收。
     # 不配 alias 的话 Pydantic v2 会静默忽略 personalContext 这个 key：
@@ -47,11 +62,12 @@ class StreamRequest(BaseModel):
     # 像是开了实则完全没生效。
     model_config = ConfigDict(populate_by_name=True)
 
-    question: str
-    history: list[HistoryItem] = []
-    top_k: int | None = None
+    question: str = Field(max_length=MAX_QUESTION_LEN)
+    history: list[HistoryItem] = Field(default=[], max_length=MAX_HISTORY_ITEMS)
+    top_k: int | None = Field(default=None, ge=1, le=50)
     # 调用方（前端）压好的「当前登录用户站内数据」文本块，见 prompts.is_personal_question
-    personal_context: str = Field(default="", alias="personalContext")
+    personal_context: str = Field(default="", alias="personalContext",
+                                  max_length=MAX_PERSONAL_CONTEXT_LEN)
 
 
 def _sse(payload: dict) -> str:
@@ -172,7 +188,16 @@ async def chat_stream(req: StreamRequest):
                 prompt = RAG_QA.format(context=build_context(hits[:top_k]), question=question,
                                        history=build_history_block(history))
                 mode = "api"
+            hint = pick_fuzzy_hint(question)
+            suffix = ""
+            if safety:
+                suffix += f"\n\n{safety}"
+            if hint:
+                suffix += f"\n\n💡 {hint}"
+
             answer = ""
+            emitted = False     # 是否已经推过至少一个 delta
+            superseded = False  # 已发 error，正文由前端整段替换，后端不再补 delta
             try:
                 iterator = llm.stream(prompt)
 
@@ -187,25 +212,31 @@ async def chat_stream(req: StreamRequest):
                     if piece is None:
                         break
                     answer += piece
+                    emitted = True
                     yield _sse({"event": "delta", "text": piece})
             except LLMUnavailable:
                 mode = "extractive"
-                answer = build_structured_answer(hits[:top_k])
-                for piece in _chunk_text(answer):
-                    yield _sse({"event": "delta", "text": piece})
-                    await asyncio.sleep(0.015)
+                fallback = build_structured_answer(hits[:top_k]) + suffix
+                answer = fallback
+                if emitted:
+                    # 模型吐了一部分又中断。已推出去的 delta 收不回来，再叠一整段
+                    # 就会粘成「半截模型文本 + 完整抽取式答案」；而且 done.answer 只
+                    # 等于后者、不等于 delta 拼接，违反本文件开头声明的事件契约。
+                    # 改为发一条携带替代正文的 error，前端会清空已渲染文本并整段替换
+                    # （见 ChatPanel.handleEvent 的 error 分支）。
+                    superseded = True
+                    yield _sse({"event": "error", "text": fallback})
+                else:
+                    for piece in _chunk_text(fallback):
+                        yield _sse({"event": "delta", "text": piece})
+                        await asyncio.sleep(0.015)
 
             # 合规后处理与非流式 _compose 对齐：风险提示与模糊引导都并进正文末尾。
             # ⚠️ 必须继续以 delta 推出去，不能只写进 done.answer：
             # 那样前端流式渲染出的文本和 done.answer 就不一致（实测 delta≠answer），
             # 用户看不到提示，还得靠前端二次拼接。
-            hint = pick_fuzzy_hint(question)
-            suffix = ""
-            if safety:
-                suffix += f"\n\n{safety}"
-            if hint:
-                suffix += f"\n\n💡 {hint}"
-            if suffix:
+            # 两种情况下跳过：抽取式降级已把 suffix 并进 fallback；error 已整段替换。
+            if suffix and not superseded and mode != "extractive":
                 answer += suffix
                 for piece in _chunk_text(suffix):
                     yield _sse({"event": "delta", "text": piece})

@@ -7,7 +7,7 @@
 import logging
 
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.config import settings
 from app.deps import knowledge
@@ -30,15 +30,25 @@ router = APIRouter(prefix="/ai", tags=["chat"])
 EMPTY_ANSWER = "请告诉我你想问什么，比如「怎么退款」「怎么实名认证」「中区在哪面交」。"
 
 
+# 输入上限。这些值足够容纳任何真实提问，同时挡住「一次塞几十 MB」的资源消耗：
+# 问题文本会全量流经 jieba 分词 → BM25 → embedding → LLM，没有上限时
+# 一个请求就能把 CPU 与 token 额度吃光（LLM 按 token 计费）。
+MAX_QUESTION_LEN = 500
+MAX_HISTORY_ITEMS = 12
+MAX_HISTORY_ITEM_LEN = 500
+
+
 class HistoryItem(BaseModel):
     role: str = "user"
-    content: str = ""
+    content: str = Field(default="", max_length=MAX_HISTORY_ITEM_LEN)
 
 
 class ChatRequest(BaseModel):
-    question: str
-    history: list[HistoryItem] = []
-    top_k: int | None = None
+    # 检索结果会被拼进 prompt，用户输入又会进检索，二者没有隔离手段，
+    # 长度上限是这里唯一能稳稳兜住的防线（见 prompts.build_context 的说明）。
+    question: str = Field(max_length=MAX_QUESTION_LEN)
+    history: list[HistoryItem] = Field(default=[], max_length=MAX_HISTORY_ITEMS)
+    top_k: int | None = Field(default=None, ge=1, le=50)
 
 
 def _sources(hits) -> list[dict]:
@@ -90,7 +100,9 @@ def _compose(question: str, hits, trace, trace_id: str, top_k: int, history=None
         "mode": mode,
         "refused": refused,
         "confidence": hits[0].confidence if hits else 0.0,
-        "sources": _sources(hits[:top_k]),
+        # 拒答时不下发来源，与非流式的 chat_stream 保持一致：置信度没过线的召回项
+        # 挂上去会让用户误以为"平台就是这么规定的"，反而制造误导。
+        "sources": _sources(hits[:top_k]) if not refused else [],
         "traceId": trace_id,
     }
     if safety:

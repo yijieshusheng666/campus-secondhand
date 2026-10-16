@@ -6,7 +6,11 @@ import java.time.LocalDateTime;
 
 // 买家与卖家围绕某件商品的沟通消息
 @Entity
-@Table(name = "messages")
+@Table(name = "messages", indexes = {
+        @Index(name = "idx_messages_goods", columnList = "goods_id"),
+        @Index(name = "idx_messages_from", columnList = "from_user_id"),
+        @Index(name = "idx_messages_to", columnList = "to_user_id")
+})
 @JsonIgnoreProperties({"hibernateLazyInitializer", "handler"})
 public class Message {
     @Id

@@ -16,6 +16,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.Order;
 import com.example.demo.entity.Review;
@@ -57,11 +58,12 @@ public class ReviewController {
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
-        if (body.get("orderId") == null || body.get("reviewerId") == null) {
+        if (body.get("orderId") == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("缺少订单或用户标识"));
         }
         Long orderId = Long.valueOf(body.get("orderId").toString());
-        Long reviewerId = Long.valueOf(body.get("reviewerId").toString());
+        // 评价人取自 token：从前读 body 里的 reviewerId，等于可以冒充买卖任意一方去给自己刷分
+        Long reviewerId = AuthContext.requireUserId();
 
         Order order = orderRepository.findById(orderId).orElse(null);
         if (order == null) {
@@ -122,9 +124,10 @@ public class ReviewController {
         return ResponseEntity.ok(result);
     }
 
-    // 我收到的评价 + 我发出的评价 + 信用概览
+    // 我收到的评价 + 我发出的评价 + 信用概览（口径固定为当前登录用户）
     @GetMapping
-    public ResponseEntity<?> list(@RequestParam Long userId) {
+    public ResponseEntity<?> list() {
+        Long userId = AuthContext.requireUserId();
         List<Map<String, Object>> received = new ArrayList<>();
         for (Review review : reviewRepository.findByRevieweeIdOrderByCreatedAtDesc(userId)) {
             received.add(view(review));
@@ -141,9 +144,10 @@ public class ReviewController {
         return ResponseEntity.ok(result);
     }
 
-    // 这笔订单我评价过没有（前端据此决定按钮文案）
+    // 这笔订单我评价过没有（前端据此决定按钮文案）。"我"取自 token，不再接受外部 reviewerId
     @GetMapping("/order")
-    public ResponseEntity<?> byOrder(@RequestParam Long orderId, @RequestParam Long reviewerId) {
+    public ResponseEntity<?> byOrder(@RequestParam Long orderId) {
+        Long reviewerId = AuthContext.requireUserId();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("success", true);
         result.put("reviewed", reviewRepository.existsByOrderIdAndReviewerId(orderId, reviewerId));
@@ -232,5 +236,5 @@ public class ReviewController {
             return null;
         }
     }
-
+
 }

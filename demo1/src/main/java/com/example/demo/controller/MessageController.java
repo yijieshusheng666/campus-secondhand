@@ -14,6 +14,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Goods;
 import com.example.demo.entity.Message;
 import com.example.demo.entity.User;
@@ -37,14 +38,14 @@ public class MessageController {
     @Autowired
     private UserRepository userRepository;
 
-    // 发送一条消息
+    // 发送一条消息。发件人取自 token：从前读 body 里的 fromUserId，等于可以冒名给别人发消息
     @PostMapping
     public ResponseEntity<?> send(@RequestBody Map<String, Object> body) {
         Long goodsId = RequestUtils.longOf(body, "goodsId");
-        Long fromUserId = RequestUtils.longOf(body, "fromUserId");
+        Long fromUserId = AuthContext.requireUserId();
         Long toUserId = RequestUtils.longOf(body, "toUserId");
         String content = RequestUtils.textOf(body, "content");
-        if (goodsId == null || fromUserId == null || toUserId == null) {
+        if (goodsId == null || toUserId == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("缺少必要的消息标识"));
         }
         if (content.isEmpty()) {
@@ -70,17 +71,19 @@ public class MessageController {
         return ResponseEntity.ok(ApiResponses.ok("已发送"));
     }
 
-    // 查询某件商品下两个人的完整对话
+    // 查询某件商品下两个人的完整对话。"我"的一方取自 token，
+    // 这样别人传任意 userId 也查不到不是自己参与的对话。
     @GetMapping
     public List<Message> conversation(@RequestParam Long goodsId,
-                                      @RequestParam Long userId,
                                       @RequestParam Long peerId) {
+        Long userId = AuthContext.requireUserId();
         return messageRepository.findConversation(goodsId, userId, peerId);
     }
 
     // 我的会话列表：按（商品 + 对方）聚合，每个会话只保留最新一条消息
     @GetMapping("/conversations")
-    public List<Map<String, Object>> conversations(@RequestParam Long userId) {
+    public List<Map<String, Object>> conversations() {
+        Long userId = AuthContext.requireUserId();
         List<Message> all = messageRepository.findByFromUserIdOrToUserIdOrderByCreatedAtDesc(userId, userId);
 
         Map<String, Map<String, Object>> grouped = new LinkedHashMap<>();

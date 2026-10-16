@@ -14,9 +14,9 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import com.example.demo.auth.AuthContext;
 import com.example.demo.entity.Dispute;
 import com.example.demo.entity.Order;
 import com.example.demo.entity.User;
@@ -39,7 +39,6 @@ import com.example.demo.web.RequestUtils;
 @RequestMapping("/api/disputes")
 public class DisputeController {
 
-    private static final String ROLE_ADMIN = "admin";
     private static final int MAX_DETAIL = 500;
 
     @Autowired
@@ -54,13 +53,13 @@ public class DisputeController {
     @Autowired
     private UserRepository userRepository;
 
-    // 买家申请平台介入
+    // 买家申请平台介入。申请人取自 token：从前读 body 里的 initiatorId，等于申请人可以自选
     @PostMapping
     @Transactional
     public ResponseEntity<?> create(@RequestBody Map<String, Object> body) {
         Long orderId = RequestUtils.longOf(body, "orderId");
-        Long initiatorId = RequestUtils.longOf(body, "initiatorId");
-        if (orderId == null || initiatorId == null) {
+        Long initiatorId = AuthContext.requireUserId();
+        if (orderId == null) {
             return ResponseEntity.badRequest().body(ApiResponses.fail("缺少订单或申请人标识"));
         }
 
@@ -103,40 +102,32 @@ public class DisputeController {
         return ResponseEntity.ok(ApiResponses.ok("已提交平台介入，货款将冻结至裁决完成", extras));
     }
 
-    // 我发起或收到的纠纷
+    // 我发起或收到的纠纷（口径固定为当前登录用户）
     @GetMapping
-    public ResponseEntity<?> list(@RequestParam Long userId) {
+    public ResponseEntity<?> list() {
+        Long userId = AuthContext.requireUserId();
         Map<String, Object> extras = new LinkedHashMap<>();
         extras.put("data", view(disputeRepository
                 .findByInitiatorIdOrRespondentIdOrderByCreatedAtDesc(userId, userId)));
         return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
-    // 管理端：待处理纠纷
+    // 管理端：待处理纠纷。调用者是不是 admin 由 AuthInterceptor 在 /api/disputes/pending 上统一校验，
+    // 这里不再自己查库判角色——原先那句判的是攻击者自己传进来的 handlerId。
     @GetMapping("/pending")
-    public ResponseEntity<?> pending(@RequestParam Long handlerId) {
-        User handler = userRepository.findById(handlerId).orElse(null);
-        if (handler == null || !ROLE_ADMIN.equals(handler.getRole())) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("无权查看该列表"));
-        }
+    public ResponseEntity<?> pending() {
         Map<String, Object> extras = new LinkedHashMap<>();
         extras.put("data", view(disputeRepository.findByStatusOrderByCreatedAtDesc(Dispute.STATUS_PENDING)));
         extras.put("handledList", view(disputeRepository.findByStatusOrderByCreatedAtDesc(Dispute.STATUS_HANDLED)));
         return ResponseEntity.ok(ApiResponses.ok("ok", extras));
     }
 
-    // 管理员裁定纠纷
+    // 管理员裁定纠纷。admin 身份由 AuthInterceptor 在 /api/disputes/*/rule 上统一校验，
+    // 这里只把处理人记成 token 里的当前用户（用于审计留痕），不再查库判角色。
     @PostMapping("/{id}/rule")
     @Transactional
     public ResponseEntity<?> rule(@PathVariable Long id, @RequestBody Map<String, Object> body) {
-        Long handlerId = RequestUtils.longOf(body, "handlerId");
-        if (handlerId == null) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("缺少处理人标识"));
-        }
-        User handler = userRepository.findById(handlerId).orElse(null);
-        if (handler == null || !ROLE_ADMIN.equals(handler.getRole())) {
-            return ResponseEntity.badRequest().body(ApiResponses.fail("只有平台管理员可以裁定纠纷"));
-        }
+        Long handlerId = AuthContext.requireUserId();
 
         Dispute dispute = disputeRepository.findById(id).orElse(null);
         if (dispute == null) {

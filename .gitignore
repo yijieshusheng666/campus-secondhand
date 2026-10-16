@@ -52,3 +52,20 @@ ai-service/data/metrics/
 
 # 敏感配置（包含数据库密码，不要提交）
 demo1/src/main/resources/application.properties
+# 运行时日志（本地调试/后台启动时重定向产生）
+# 注意：实际文件名是 .ai-service.log（带中划线），原先只忽略了 .ai.log，对不上
+_dev.log
+.runlogs/
+ai-service/.ai-service.log
+ai-service/.ai-service.log.err
+ai-service/.ai.log
+ai-service/.ai.log.err
+
+# 前端 dev server 日志
+frontend/.vite.log
+frontend/.vite.log.err
+
+# 语义模型权重（BAAI/bge-small-zh-v1.5，约 184MB）。
+# 二进制大文件不该进仓库：clone 会变得极慢，而且 huggingface.co 本机不可达，
+# 需要的人按 ai-service/README.md 里的说明用 hf-mirror 镜像重新下载即可。
+ai-service/models/

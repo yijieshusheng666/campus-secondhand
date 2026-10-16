@@ -1,9 +1,10 @@
 <script setup>
-import { ref, computed, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick, watch } from 'vue'
 import request from '../api'
 import { avatarUrl } from '../avatars'
 import { useCurrentUser } from '../composables/useCurrentUser'
-import { ensurePersonalContext, getPersonalContext, looksPersonal } from '../composables/usePersonalContext'
+import { getToken } from '../session'
+import { clearPersonalContext, ensurePersonalContext, getPersonalContext, looksPersonal } from '../composables/usePersonalContext'
 
 const currentUser = useCurrentUser()
 
@@ -30,10 +31,6 @@ const fallbackRules = [
 // 可中止的流控制器：用户点"停止"时用它断开 fetch
 let streamAbort = null
 
-function getImageUrl(path) {
-  if (!path) return ''
-  return path.startsWith('http') ? path : path
-}
 
 // -----------------------------------------------------------------------
 // 「贴底跟随」：自动滚动只在用户本来就在底部时才生效
@@ -127,8 +124,11 @@ function jumpToLatest() {
 const CHAR_RATE = 34       // 恒定出字速度（字/秒）
 const charRate = CHAR_RATE
 
-// 版本探针：模块每次被加载都会打这一行，用来确认浏览器跑的是不是最新代码
-console.log('[ChatPanel] build=tps-34cps loaded at', new Date().toLocaleTimeString())
+// 版本探针：模块每次被加载都会打这一行，用来确认浏览器跑的是不是最新代码。
+// 只在 dev 输出：生产包里留一行 console.log 没有价值，还会被误当成调试残留。
+if (import.meta.env.DEV) {
+  console.log('[ChatPanel] build=tps-34cps loaded at', new Date().toLocaleTimeString())
+}
 
 let currentTw = null       // 同时只有一路流，用模块级变量，避免塞进响应式对象
 
@@ -325,9 +325,16 @@ function askLocalRule(text) {
  *   error → Java 代理在 AI 服务不可用时补发（AiClient.streamChat 的兜底）
  */
 async function askStream(text, target) {
+  // 这条走裸 fetch 而不是 axios 实例，所以要自己带头。
+  // 该端点对匿名访客开放（客服悬浮按钮人人可见），带头是为了登录用户也能被正确识别，
+  // 免得以后把它收紧成需登录时又得回来补一刀。
+  const headers = { 'Content-Type': 'application/json' }
+  const authToken = getToken()
+  if (authToken) headers.Authorization = `Bearer ${authToken}`
+
   const resp = await fetch('/api/ai/chat/stream', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       question: text,
       history: buildHistory(),
@@ -401,9 +408,13 @@ function handleEvent(payload, target) {
     // 正文长度在这之后还会变（补齐 / 兜底文案），必须再滚一次
     scrollAfterRender()
   } else if (kind === 'error') {
+    // 先清空已渲染的增量：模型可能已经吐了半截又断流，那些字收不回去，
+    // 只能整段替换（target.text 是 += 追加，不清就会粘在兜底文案后面）。
     if (currentTw) currentTw.clear()
-    target.text = 'AI 服务暂时不可用，我先用关键词帮你找找看。'
-    target.mode = 'unavailable'
+    // 后端在「模型流到一半中断」时会带一份替代正文（抽取式答案），
+    // 直接用它；整体不可用（Java 侧合成的 error）则没有 text，走原兜底文案。
+    target.text = payload.text || 'AI 服务暂时不可用，我先用关键词帮你找找看。'
+    target.mode = payload.text ? 'extractive' : 'unavailable'
   }
 }
 
@@ -424,6 +435,7 @@ async function sendMessage() {
 
   try {
     await askStream(text, target)
+    aiOnline.value = true
     // 先通知「流已结束」再等：即使全程零个 delta（AI 挂掉），
     // endOfStream() 也会直接 resolve done，不会永久卡在这里
     if (currentTw) currentTw.endOfStream()
@@ -435,6 +447,7 @@ async function sendMessage() {
     if (target.mode === 'unavailable' || !target.text) {
       target.text = ''
       target.sources = []
+      aiOnline.value = false
       await fallbackLayers(target, text, target.mode === 'unavailable' ? 'unavailable' : 'empty')
     }
   } catch (e) {
@@ -448,6 +461,7 @@ async function sendMessage() {
       target.text = ''
       target.sources = []
       // 真实原因传下去：网络断了和非 200 是两回事，不该一律说「服务没启动」
+      aiOnline.value = false
       await fallbackLayers(target, text, e.fallbackReason || 'network')
     }
     target.streaming = false
@@ -498,6 +512,15 @@ function viewGoods() {
   emit('go-home')
 }
 
+// 聊天记录按用户隔离：原来所有账号共用 'chatHistory' 一个键，同一台电脑换人登录后，
+// 上一位用户问过的订单金额、地址相关问答会直接显示在客服面板里。
+const HISTORY_PREFIX = 'chatHistory'
+
+function historyKey() {
+  const id = currentUser.value?.id
+  return id ? `${HISTORY_PREFIX}:${id}` : `${HISTORY_PREFIX}:anon`
+}
+
 function saveHistory() {
   const history = messages.value
     .filter(m => m.text)
@@ -512,11 +535,11 @@ function saveHistory() {
       goods: m.goods.map(g => g.id),
       sources: m.sources
     }))
-  localStorage.setItem('chatHistory', JSON.stringify(history.slice(-50)))
+  localStorage.setItem(historyKey(), JSON.stringify(history.slice(-50)))
 }
 
 async function loadHistory() {
-  const saved = localStorage.getItem('chatHistory')
+  const saved = localStorage.getItem(historyKey())
   if (!saved) return
   try {
     const history = JSON.parse(saved)
@@ -536,7 +559,7 @@ async function loadHistory() {
 
 function clearHistory() {
   messages.value = []
-  localStorage.removeItem('chatHistory')
+  localStorage.removeItem(historyKey())
   addMessage('ai', '对话已清空，有什么可以帮你的吗？')
 }
 
@@ -556,15 +579,20 @@ const OFFLINE_MODE = 'offline'
  * 原因不同该提示的内容也不同。现在如实告知，不再一律往「服务没启动」上归。
  */
 function offlineHint(reason) {
+  // 必须带时间戳。这条提示会被写进 localStorage 永久保存 ——
+  // 几小时前 AI 停机时产生的提示，今天再看和刚生成的一模一样，
+  // 用户根本分不清这是"刚才就这样"还是"历史遗留"，白白排查半天。
+  const at = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  const tail = `（${at} 生成，AI 助手当时未接入）`
   switch (reason) {
     case 'http':
-      return '这次请求没拿到正常响应（后端异常或 AI 服务未启动）。回答来自本地兜底规则。'
+      return '这次请求没拿到正常响应（后端异常或 AI 服务未启动）。回答来自本地兜底规则。' + tail
     case 'network':
-      return '这次请求没能连上后端。回答来自本地兜底规则，请确认 Spring Boot 与 ai-service 都在运行。'
+      return '这次请求没能连上后端。回答来自本地兜底规则，请确认 Spring Boot 与 ai-service 都在运行。' + tail
     case 'unavailable':
-      return 'AI 服务当前不可用。回答来自本地兜底规则，启动 ai-service 后可以问到更完整的回答。'
+      return 'AI 服务当时不可用。回答来自本地兜底规则，启动 ai-service 后可以问到更完整的回答。' + tail
     default:
-      return '这次没有得到 AI 的回答。回答来自本地兜底规则。'
+      return '这次没有得到 AI 的回答。回答来自本地兜底规则。' + tail
   }
 }
 
@@ -578,12 +606,53 @@ function modeLabel(mode) {
 }
 
 // 分片 → 中文名，界面上比 shard 字段（rules/guides/faq）好懂
+// AI 助手在线状态。管理端能连上不代表聊天能连上（两跳路径不同：
+// ops 走普通 RestTemplate，流式走 streamRestTemplate 且 readTimeout=ZERO）。
+// 所以聊天面板自己探一次，比让人对着历史消息猜靠谱。
+const aiOnline = ref(true)
+// Java 侧捕获到的真实异常（见 AiClient.streamChat 的 reason 字段）。
+// 有了它，「连不上 AI」「AI 返回 500」「响应格式不对」在界面上就是三件不同的事。
+const aiReason = ref('')
+
+async function probeAi() {
+  try {
+    // 用一句必定被拒答的短问：只验证「Java→AI 的流式这一跳通不通」。
+    // 拒答走抽取式分支、不调大模型，探活几乎零成本。
+    const r = await fetch('/api/ai/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question: '个啌品' })
+    })
+    const t = await r.text()
+    const m = t.match(/"reason"\s*:\s*"([^"]*)"/)
+    aiReason.value = m ? m[1] : ''
+    aiOnline.value = !t.includes('event: error')
+  } catch (e) {
+    aiReason.value = e && e.message ? String(e.message) : '网络请求失败'
+    aiOnline.value = false
+  }
+}
+
 onMounted(async () => {
+  probeAi()
   // 预热个人数据上下文。聊天面板是常驻挂载的，用户从别处切进来时上下文多半还是冷的，
   // 这里 fire-and-forget 先拉一次；第一条个人问题就能直接命中缓存，不再等网络。
   // 未登录时 composable 直接返回空串，这里不用判断。
   ensurePersonalContext().catch(() => {})
-  if (localStorage.getItem('chatHistory')) {
+  if (localStorage.getItem(historyKey())) {
+    await loadHistory()
+  } else {
+    addMessage('ai', '你好，我是校园小助手 🎓 想找什么宝贝？也可以问我平台规则，比如"怎么退款"，我会附上依据来源。')
+  }
+})
+
+// 切换账号（登录 / 退出 / 令牌过期被踢）时清空会话并重载：
+// 面板是常驻挂载（v-show）的，内存里的 messages 不会自己复位，
+// 不清就会把上一位用户的提问、以及带着他数据的个人化上下文继续用下去。
+watch(() => currentUser.value?.id, async () => {
+  clearPersonalContext()
+  messages.value = []
+  if (localStorage.getItem(historyKey())) {
     await loadHistory()
   } else {
     addMessage('ai', '你好，我是校园小助手 🎓 想找什么宝贝？也可以问我平台规则，比如"怎么退款"，我会附上依据来源。')
@@ -608,7 +677,18 @@ onMounted(async () => {
       </div>
     </div>
 
-    <div ref="chatBodyRef" class="chat-body" @scroll.passive="onBodyScroll">      <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.type">
+    <!-- 只在离线时出现的一条极细状态条。历史消息里的离线提示会长期留在
+     localStorage，光看那些没法判断「现在还能不能用」，所以给一个实时信号。 -->
+    <div v-if="!aiOnline" class="ai-offline-bar">
+      <span>AI 服务离线，问答走本地兜底</span>
+      <el-tooltip v-if="aiReason" :content="aiReason" placement="bottom">
+        <span class="ai-offline-reason">{{ aiReason }}</span>
+      </el-tooltip>
+      <el-button text size="small" @click="probeAi">重新检测</el-button>
+    </div>
+
+    <div ref="chatBodyRef" class="chat-body" @scroll.passive="onBodyScroll">
+      <div v-for="(msg, idx) in messages" :key="idx" class="message" :class="msg.type">
         <img
           v-if="msg.type === 'ai'"
           class="msg-avatar"
@@ -651,7 +731,7 @@ onMounted(async () => {
 
           <div v-if="msg.goods && msg.goods.length" class="goods-cards">
             <div v-for="g in msg.goods" :key="g.id" class="goods-card" @click="viewGoods(g)">
-              <img :src="getImageUrl(g.images?.[0]?.imageUrl)" alt="宝贝">
+              <img :src="g.images?.[0]?.imageUrl" alt="宝贝">
               <div class="goods-card-title">{{ g.title }}</div>
               <div class="goods-card-price">¥{{ g.price }}</div>
               <div class="goods-card-btn">去看看</div>
@@ -730,6 +810,18 @@ onMounted(async () => {
   user-select: none;
 }
 .close-btn:hover { background: #f2f2f2; color: #333; }
+.ai-offline-reason {
+  max-width: 320px; overflow: hidden; text-overflow: ellipsis;
+  white-space: nowrap; opacity: .75; cursor: help;
+}
+
+.ai-offline-bar {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 16px;
+  background: #fff4d6; border-bottom: 1px solid #ffe4a3;
+  font-size: 12px; color: #8a6100;
+}
+
 .chat-body {
   flex: 1;
   overflow-y: auto;
