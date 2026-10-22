@@ -51,6 +51,13 @@ const chatVisible = ref(false)
 const fabTipVisible = ref(!localStorage.getItem('fabTipClosed'))
 const fabRef = ref(null)
 
+// 移动端隐藏悬浮客服按钮的页面。
+// 「消息」页本身就是一个聊天窗，底部还有输入框和发送按钮 ——
+// 悬浮按钮固定在右下角时正好压住「发送」，实测点不到（375px 屏）。
+// 用 CSS 类而不是 JS 媒体查询开关，是为了不引入 resize 监听：
+// 这个按钮在桌面端必须始终可见。
+const hideFabOnMobile = computed(() => route.path.startsWith('/messages'))
+
 function toggleChat() {
   chatVisible.value = !chatVisible.value
   if (chatVisible.value) {
@@ -142,7 +149,7 @@ async function onLogout() {
 
     <!-- 悬浮智能客服：传送到 body，彻底脱离页面布局与层叠上下文影响 -->
     <Teleport to="body">
-      <button ref="fabRef" class="chat-fab" type="button" data-version="v3" title="智能客服 (v3)">
+      <button ref="fabRef" class="chat-fab" :class="{ 'hide-on-mobile': hideFabOnMobile }" type="button" data-version="v3" title="智能客服 (v3)">
         <img class="chat-fab-icon" src="/images/icons/bot.svg" alt="智能客服" />
         <transition name="fade">
           <span v-if="fabTipVisible" class="fab-tip">有问题？问一问</span>
@@ -360,5 +367,103 @@ body {
   border-left: 6px solid var(--ink-color);
   border-top: 5px solid transparent;
   border-bottom: 5px solid transparent;
+}
+
+/* ============================================================
+   移动端适配（≤768px）
+   桌面是「一行三段式」：logo | 导航 | 用户区。
+   手机上这一行放不下 6~7 个带图标的入口（实测 375px 屏溢出约 180px），
+   所以改成两行：第一行 logo + 用户区，第二行导航（横向可滚动）。
+   选择横向滚动而不是换行堆叠，是因为入口数量会随角色变化（管理员多一个「管理端」），
+   换行会让头部高度不稳定，还会把首屏内容顶下去。
+   ============================================================ */
+@media (max-width: 768px) {
+  .header-inner {
+    height: auto;
+    padding: 8px 12px;
+    gap: 6px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* 品牌区：只留 logo 图形 + 主标题，slogan 在手机上纯占地方 */
+  .logo { gap: 8px; }
+  .logo-mark { height: 32px; }
+  .logo-text { font-size: 15px; }
+  .logo-slogan { display: none; }
+
+  /* 用户区：只留头像和退出，昵称省掉（点头像进个人中心能看到） */
+  .user-area { gap: 6px; }
+  .username { display: none; }
+  /* 退出按钮在触屏上要够大，但它挤占了 logo 的空间，收成纯文字链接 */
+  .user-area .el-button { padding: 4px 2px; }
+
+  /* 导航：第二行整行铺开、横向滚动，不换行 */
+  .nav-links {
+    flex: 1 1 100%;
+    order: 3;
+    justify-content: flex-start;
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    /* 隐藏滚动条：iOS 上惯性滚动仍然可用，只是不显示那条灰线 */
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
+  .nav-links::-webkit-scrollbar { display: none; }
+
+  .nav-link {
+    flex: 0 0 auto;      /* 关键：不压缩，否则 7 个入口会被挤成竖排文字 */
+    padding: 7px 12px;
+    font-size: 13px;
+    gap: 4px;
+  }
+  .nav-icon { width: 18px; height: 18px; }
+
+  /* 主内容区：左右留白从 20px 收到 12px，底部留出悬浮客服按钮的高度，
+     否则最后一张卡片会被按钮压住点不到 */
+  .main {
+    padding: 10px 12px calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 客服面板：手机上直接全屏，别做成「380px 宽的浮窗」——
+     375px 的屏幕塞进去只剩边角，聊天气泡会被挤成一条 */
+  .chat-widget {
+    inset: 0;
+    right: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    transform: none;
+    border-radius: 0;
+    box-shadow: none;
+    /* 顶部让开状态栏，底部让开手势条 */
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
+  }
+
+  /* 提示语在手机上会飘到屏幕外，直接不显示 */
+  .fab-tip { display: none; }
+
+  /* 按钮本身也收小一档：60px 在 375 屏上盖住的面积太大，会压到卡片里的按钮 */
+  .chat-fab {
+    width: 52px;
+    height: 52px;
+  }
+  .chat-fab img { width: 34px; height: 34px; }
+
+  /* 「消息」页底部有输入框和发送按钮，悬浮按钮会正好压住「发送」（实测点不到） */
+  .chat-fab.hide-on-mobile { display: none; }
+}
+
+@media (max-width: 480px) {
+  .logo-text { font-size: 14px; }
+  .logo-mark { height: 28px; }
+  .nav-link { padding: 6px 10px; font-size: 12.5px; }
+  .main { padding: 8px 10px calc(80px + env(safe-area-inset-bottom, 0px)); }
 }
 </style>

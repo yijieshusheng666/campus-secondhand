@@ -264,8 +264,7 @@ onMounted(loadWanted)
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-.gc-price { color: var(--price-color); font-weight: bold; margin-bottom: 6px; }
+}.gc-price { color: var(--price-color); font-weight: bold; margin-bottom: 6px; }
 .match-meta {
   margin-top: 12px;
   font-size: 12px;
@@ -283,5 +282,32 @@ onMounted(loadWanted)
   margin-bottom: 6px;
   line-height: 1.5;
   text-align: left;
+}
+
+/* ============================================================
+   移动端适配（≤768px）
+   ============================================================ */
+@media (max-width: 768px) {
+  /* 预算行是「分类 select(160px) + 预算 input(180px)」，加起来 350px，
+     比卡片内可用宽度还宽 —— 实测 input 被挤到只剩 100px，
+     占位文字「预算上限（选填）」只显示出一半。改成一行一个。 */
+  .form-row {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .form-row :deep(.el-select),
+  .form-row :deep(.el-input) {
+    /* 行内 style="width:160px/180px" 必须用 !important 才压得住 */
+    width: 100% !important;
+    flex: 1 1 100%;
+  }
+
+  /* 匹配结果卡片：桌面固定 150px，手机上按两列铺满 */
+  .goods-card { width: calc(50% - 6px); }
+  .goods-card > img { height: auto; aspect-ratio: 4 / 3; }
+
+  /* 求购条目的标题行 + 操作按钮在窄屏上会挤，允许换行 */
+  .wanted-head { flex-wrap: wrap; }
+  .wanted-actions { flex-wrap: wrap; }
 }
 </style>

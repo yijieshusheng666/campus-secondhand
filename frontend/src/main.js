@@ -25,6 +25,10 @@ window.ElNotification = ElNotification
 
 import imgFallback from './directives/imgFallback'
 
+// 移动端适配层。放在最后 import：它要覆盖 Element Plus 的默认样式，
+// 必须排在 element-plus 的 css 之后才能生效（同权重后者胜）。
+import './styles/mobile.css'
+
 // 全局注册图片兜底指令。放在这里而不是逐个组件 import，
 // 是为了「以后新增页面不用记得加，忘了就又多一处破图」。
 app.directive('img-fallback', imgFallback)

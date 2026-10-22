@@ -121,7 +121,21 @@ const title = computed(() => MENU.find(m => current.value.startsWith(m.path))?.l
   .admin-shell { flex-direction: column; }
   .side { width: 100%; height: auto; position: static; flex-direction: row; align-items: center; overflow-x: auto; }
   .side-brand { display: none; }
-  .side-nav { flex-direction: row; }
+  .side-nav { flex-direction: row; padding: 4px 6px; gap: 2px; }
+
+  /* ⚠️ 这两行是必须的：侧边栏从竖排改成横排后，每个 item 仍是 flex 容器，
+     没有 nowrap 时「平台概览」会被压成一列一个字（实测 375px 屏上就是竖排的）。
+     flex: 0 0 auto 保证不被压缩，多出来的宽度交给 .side 的横向滚动。 */
+  .side-item { flex: 0 0 auto; white-space: nowrap; padding: 8px 10px; }
+  .side-ico { width: 16px; height: 16px; }
   .side-item.active { box-shadow: inset 0 -3px 0 #ffd21e; }
+
+  .body { padding: 12px 12px 24px; }
+  .topbar { padding: 10px 12px; }
+  .topbar-title { font-size: 16px; }
+}
+
+@media (max-width: 480px) {
+  .side-item { padding: 7px 8px; font-size: 12.5px; }
 }
 </style>

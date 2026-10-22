@@ -2,7 +2,9 @@
 <html lang="zh-CN">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <!-- viewport-fit=cover：让页面铺到刘海屏两侧，env(safe-area-inset-*) 才拿得到值。
+       不加它，iPhone 上 fixed 定位的客服按钮会压到 home indicator 下面点不动。 -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <link rel="icon" type="image/png" href="/favicon.png">
   <link rel="apple-touch-icon" href="/apple-touch-icon.png">
   <title>校园二手交易平台</title>

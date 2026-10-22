@@ -75,6 +75,18 @@ async function openConversation(conv) {
   loadActiveGoods()
 }
 
+/**
+ * 手机上「返回会话列表」。
+ * 桌面是左右两栏，两栏同时可见；手机上只能显示一栏，所以需要一个显式出口。
+ * 不传参直接清空 active：4 秒轮询里的 loadMessages 有 `if (!active.value) return` 守卫，
+ * 清空后不会继续拉消息，安全。
+ */
+function backToList() {
+  active.value = null
+  messages.value = []
+  activeGoods.value = null
+}
+
 // 会话对应的商品详情：既给头部卡片用（图片/价格），也给 AI 摘要/议价提供商品信息
 const activeGoods = ref(null)
 
@@ -259,7 +271,7 @@ onUnmounted(() => {
       </el-empty>
     </div>
 
-    <div v-else class="msg-layout">
+    <div v-else class="msg-layout" :class="{ 'has-active': !!active }">
       <!-- 会话列表 -->
       <aside class="conv-list">
         <div class="conv-head">我的消息</div>
@@ -277,6 +289,8 @@ onUnmounted(() => {
         <template v-if="active">
           <div class="chat-head">
             <div class="chat-head-main">
+              <!-- 只在小屏显示：桌面两栏并排，不需要返回 -->
+              <button type="button" class="chat-back" @click="backToList">‹ 会话列表</button>
               <div class="chat-peer">与「{{ active.peerName || '对方' }}」沟通中</div>
               <!-- 点卡片直接回首页看这件宝贝的详情 -->
               <div class="chat-goods-card" :class="{ empty: !active.goodsId }" @click="goGoods">
@@ -512,5 +526,74 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+/* 返回按钮：桌面不显示（两栏并排，不存在"返回"这个概念） */
+.chat-back { display: none; }
+
+/* ============================================================
+   移动端适配（≤768px）
+   桌面是「左会话列表 280px + 右聊天窗」两栏并排。
+   手机上两栏各占一半都放不下一句话，所以改成**主从切换**：
+   没选会话时只显示列表，选了之后只显示聊天窗，用「‹ 会话列表」返回。
+   ============================================================ */
+@media (max-width: 768px) {
+  .msg-layout {
+    /* 140px 是按桌面单行头部算的；手机头部是两行、高度不固定，
+       用 dvh 让聊天区自动吃满剩余高度（地址栏收起/展开时也不会跳动） */
+    height: calc(100dvh - 132px);
+    min-height: 380px;
+    gap: 0;
+  }
+
+  .conv-list {
+    width: 100%;
+    border-radius: 12px;
+  }
+
+  /* 主从切换的两个方向 */
+  .msg-layout.has-active .conv-list { display: none; }
+  .msg-layout:not(.has-active) .chat-area { display: none; }
+
+  .chat-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    margin: 0 0 6px -4px;
+    padding: 2px 6px;
+    border: none;
+    background: transparent;
+    color: #1a5fb4;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+
+  /* 头部：标题 + 两个 AI 按钮在 375px 上会挤成两行并顶出宝贝卡片，
+     让操作区换到下一行、右对齐 */
+  .chat-head {
+    padding: 10px 12px;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .chat-head-main { flex: 1 1 100%; }
+  .chat-actions { flex: 1 1 100%; justify-content: flex-end; }
+  .chat-peer { font-size: 14px; }
+  .chat-goods-card { max-width: 100%; }
+
+  .chat-body { padding: 12px; }
+  /* 气泡占宽从 72% 放到 82%：手机上一句话本来就短，太窄会折成三段 */
+  .msg-bubble { max-width: 82%; font-size: 14px; }
+  .chat-input { padding: 8px 10px; gap: 8px; }
+  .chat-input .el-button { flex: 0 0 auto; }
+
+  /* 会话列表项：加大点击高度，手指点得准 */
+  .conv-item { padding: 12px; }
+  .conv-head { padding: 12px 14px; font-size: 14px; }
+}
+
+@media (max-width: 480px) {
+  .msg-layout { height: calc(100dvh - 124px); }
+  .chat-actions :deep(.el-button) { padding: 6px 10px; font-size: 12px; }
 }
 </style>

@@ -590,5 +590,111 @@ async function openFromQuery() {
 .addr-item.selected { border-color: #ffd21e; background: #fffbea; }
 .addr-name { font-weight: bold; }
 .addr-detail { font-size: 13px; color: #666; margin-top: 4px; }
+
+/* ============================================================
+   移动端适配（≤768px）
+   ============================================================ */
+@media (max-width: 768px) {
+  /* 横幅：桌面是「文字左 / 搜索右」，手机上改成上下堆叠 */
+  .hero {
+    padding: 16px;
+    gap: 12px;
+    border-radius: 12px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .hero-title { font-size: 18px; }
+  .hero-sub { font-size: 12px; }
+
+  /* min-width: 280px 在 320px 屏上会让整行溢出（280 + 按钮 + gap > 320），必须解掉 */
+  .hero-search {
+    min-width: 0;
+    max-width: none;
+    width: 100%;
+    gap: 8px;
+  }
+  /* 搜索框和按钮在窄屏上并排太挤，按钮收窄成一个图标式的短词 */
+  .hero-search .el-button {
+    flex: 0 0 auto;
+    padding: 0 14px;
+  }
+
+  /* 分类胶囊：7 个横排会换行成 3 行、把首屏挤没，改成横向滚动一行 */
+  .cate-bar {
+    margin: 12px 0 14px;
+    gap: 8px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    /* 左右各留 2px 负边距补偿，让首尾胶囊贴边时不被裁掉圆角 */
+    padding: 2px;
+  }
+  .cate-bar::-webkit-scrollbar { display: none; }
+  .cate-chip {
+    flex: 0 0 auto;         /* 不压缩，否则文字被挤成竖排 */
+    padding: 7px 12px;
+    font-size: 13px;
+  }
+
+  /* 商品流：桌面 auto-fill 最小 216px → 375px 上只能排 1 列，
+     手机上要的是「两列瀑布」。148px 是实测能放下 ¥2899 这种价位的下限。 */
+  .feed-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+  /* 图片高度跟随宽度，不再是桌面固定的 175px（两列时卡片只有约 175px 宽） */
+  .gc-img {
+    height: auto;
+    aspect-ratio: 1 / 1;
+  }
+  .gc-body { padding: 8px 9px 10px; }
+  .gc-title { font-size: 13px; height: 36px; margin-bottom: 6px; }
+  /* 标签在窄卡片上会折两行，去掉「学生自用」这类装饰性标签的换行压力 */
+  .gc-tags { gap: 4px; margin-bottom: 6px; }
+  .gc-tag { font-size: 10px; padding: 0 5px; line-height: 16px; }
+
+  /* 价格 + 两个按钮在 ~165px 宽的卡片里放不下一行，改成上下两行：
+     上排价格，下排两个等宽按钮（也顺带把点击区域做大了） */
+  .gc-bottom {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  .gc-price { font-size: 13px; }
+  .gc-price-num { font-size: 17px; }
+  .gc-actions { gap: 6px; }
+  .gc-actions .el-button {
+    flex: 1;
+    min-width: 0;
+    margin-left: 0;
+    padding: 6px 0;
+  }
+  .want-btn, .chat-btn { padding: 6px 0; font-size: 12px; }
+
+  /* 详情弹窗：左图右文改成上图下文 */
+  .detail { flex-direction: column; gap: 12px; }
+  .detail-img {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1 / 1;
+    max-height: 240px;
+    border-radius: 10px;
+  }
+  .detail-title { font-size: 16px; }
+  .detail-price span { font-size: 21px; }
+  .detail-desc { font-size: 13px; }
+
+  /* 评价区页脚：统计文字和按钮并排会换行错位，允许折行 */
+  .rv-foot { flex-wrap: wrap; }
+}
+
+@media (max-width: 480px) {
+  .hero-title { font-size: 16px; }
+  .feed-grid { gap: 8px; }
+  .gc-img { aspect-ratio: 1 / 1; }
+  /* 小屏上「聊一聊」两个字 + 图标容易超宽，再收一档 */
+  .want-btn, .chat-btn { font-size: 11.5px; }
+}
 </style>
 

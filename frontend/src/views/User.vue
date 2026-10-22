@@ -704,4 +704,47 @@ onMounted(() => {
 .addr-item.active { border-color: #ffd21e; background: #fffbea; }
 .addr-detail { font-size: 13px; color: #666; margin-top: 2px; }
 .addr-empty { color: #999; font-size: 13px; padding: 8px 0; }
+
+/* ============================================================
+   移动端适配（≤768px）
+   ============================================================ */
+@media (max-width: 768px) {
+  /* 个人中心头部这一排有 5 个按钮（实名/昵称/头像/地址/退出）。
+     桌面靠 justify-content: center 居中，但**没有 wrap**：5 个按钮总宽约 480px，
+     在 375px 屏上会向两侧同时溢出 —— 最左边那个被裁掉一半，
+     而且因为居中，左边溢出部分滚不到（没有滚动容器）。
+     改成居中 + 换行即可，每行 2~3 个。 */
+  .menu-row {
+    flex-wrap: wrap;
+    gap: 8px;
+    justify-content: center;
+  }
+  /* Element 给相邻按钮加了 margin-left: 12px，和上面的 gap 叠加会变成 20px，
+     换来换去间距忽大忽小，移动端统一交给 gap */
+  .menu-row .el-button {
+    margin-left: 0;
+    flex: 0 1 auto;
+  }
+
+  /* 头像区收紧一点，避免「头像 + 昵称 + 学号 + 实名」占掉大半屏 */
+  .user-avatar { margin-bottom: 6px; }
+  .stuid { font-size: 12px; }
+
+  /* 信用分：大数字 + 说明在窄屏上并排会挤，改成上下 */
+  .credit-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .credit-score { font-size: 34px; }
+
+  /* 我的商品行：勾选框 + 文字，让文字占满剩余宽度 */
+  .goods-row { gap: 6px; }
+  .goods-row-main { min-width: 0; }
+}
+
+@media (max-width: 480px) {
+  .menu-row .el-button { padding: 8px 12px; font-size: 13px; }
+  .section-header h3 { font-size: 15px; }
+}
 </style>

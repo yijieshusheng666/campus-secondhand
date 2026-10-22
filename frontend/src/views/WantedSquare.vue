@@ -179,4 +179,14 @@ onMounted(loadSquare)
   line-height: 1.5;
   text-align: left;
 }
+
+/* ============================================================
+   移动端适配（≤768px）：只调卡片与条目行，页面容器本身是弹性的
+   ============================================================ */
+@media (max-width: 768px) {
+  .goods-card { width: calc(50% - 6px); }
+  .goods-card > img { height: auto; aspect-ratio: 4 / 3; }
+  .wanted-head { flex-wrap: wrap; }
+  .wanted-actions { flex-wrap: wrap; }
+}
 </style>
