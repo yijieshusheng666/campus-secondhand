@@ -1,0 +1,28 @@
+# 生产环境依赖（2 核 2G 服务器专用，故意不含 sentence-transformers）
+#
+# 为什么不直接装 requirements.txt：那个文件里的 sentence-transformers 会拖来
+# torch（wheel 118MB，解包 ~700MB，仅 import 就要 250-300MB 常驻内存）。
+# 这台机器上已经跑着三个项目，available 只有 ~990MB，装 torch 有把握把
+# 邻居服务一起顶到 OOM Killer。
+#
+# 不装它不会报错：embedding.py 里模型加载失败会**自动降级**成
+# jieba + HashingVectorizer 的词袋模式（mode="tfidf"，阈值 0.20 实测标定过），
+# 这是项目两级降级设计的一半，不是临时 hack。
+#
+# 生成侧不受影响：LLM 是远程 HTTP 调用，配好 LLM_* 就仍然是真模型流式生成。
+#
+# 想要回真向量（512 维 bge-small-zh）时：
+#   1) 把本文件换成 requirements.txt 重装
+#   2) 下载模型到 ai-service/models/bge-small-zh-v1.5
+#   3) .env 里 EMB_FORCE_TFIDF=false、EMB_MODEL=./models/bge-small-zh-v1.5
+#   4) 重启服务并重建索引（维度从 4096 变 512，必须重建）
+#   前提：先给机器腾出 ~500MB 常驻内存，否则会触发 OOM。
+
+fastapi
+uvicorn[standard]
+pydantic
+numpy
+httpx
+jieba
+scikit-learn
+python-dotenv

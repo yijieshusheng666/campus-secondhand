@@ -1,0 +1,66 @@
+# ============================================================
+# 校园二手交易平台 —— 后端 systemd 服务
+# 放置路径：/etc/systemd/system/secondhand-api.service
+#
+# 启用：
+#   systemctl daemon-reload
+#   systemctl enable --now secondhand-api
+#   systemctl status secondhand-api --no-pager
+# ============================================================
+
+[Unit]
+Description=Secondhand API (Spring Boot)
+After=network-online.target mysql.service
+Wants=network-online.target
+
+# 不限制重启次数。systemd 默认「10 秒内失败 5 次就放弃」，之后会停在
+# start-limit-hit 状态、必须手动 reset-failed 才肯再启动，排查配置错误时
+# 极具迷惑性。注意：这个键属于 [Unit] 段，写到 [Service] 段会被静默忽略。
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=secondhand
+Group=secondhand
+WorkingDirectory=/opt/secondhand/backend
+
+# 商品图片上传目录。
+# ⚠️ 只能用环境变量（或 -Dapp.upload.dir），写在 application.properties 里无效 ——
+# UploadPaths 是静态工具类，直接读 System.getProperty / System.getenv，
+# 不经过 Spring 的配置体系。写成绝对路径，避免按启动目录解析出另一个位置。
+Environment=APP_UPLOAD_DIR=/opt/secondhand/uploads
+
+# 生产配置就是 WorkingDirectory 下的 application.properties（chmod 600）。
+# Spring Boot 的 file:./ 优先级高于 jar 内的 classpath:/application.properties，
+# 所以构建发布用的 jar 时特意**没有**把本地配置打进去，避免本地库密码被带到线上。
+# 这里不再额外挂 EnvironmentFile：配置只有一处来源，排查时不用猜「到底哪个生效了」。
+#
+# ---- 堆内存：这台机器 2 核 2G，还住着三个别家的服务 ----
+# -Xmx320m 是实测下的安全值：Spring Boot + JPA + 这个业务量足够。
+#   -Xss512k            线程栈默认 1MB，接口不多时 512k 够用，省下几十个线程的栈
+#   -XX:+UseSerialGC    2 核小堆用串行 GC 比 G1 更省 CPU 和常驻
+#   -XX:MaxMetaspaceSize 封顶，防止元空间无限上涨
+#   -XX:+ExitOnOutOfMemoryError  真 OOM 时直接退出让 systemd 拉起，
+#                       不要带着残缺状态继续服务（这类僵尸进程最难查）
+ExecStart=/usr/bin/java \
+    -Xms128m -Xmx320m -Xss512k \
+    -XX:MaxMetaspaceSize=160m \
+    -XX:+UseSerialGC \
+    -XX:+ExitOnOutOfMemoryError \
+    -Dfile.encoding=UTF-8 \
+    -Duser.timezone=Asia/Shanghai \
+    -jar /opt/secondhand/backend/demo1.jar
+
+Restart=always
+RestartSec=5
+SuccessExitStatus=143
+
+# 只监听 127.0.0.1（application.properties 的 server.address），公网入口统一走 Nginx；
+# 这里再用 systemd 兜一层：禁止提权、/tmp 与 /opt 之外只读。
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+
+[Install]
+WantedBy=multi-user.target

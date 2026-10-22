@@ -1,0 +1,12 @@
+# 部署脚本必须在 Linux 上能直接执行。
+# Windows 的 core.autocrlf=true 会把 .sh 检出成 CRLF，Linux 上执行会报
+# `bash: $'\r': command not found` —— 这个错看着像脚本语法问题，其实全是换行符。
+*.sh       text eol=lf
+deploy/*   text eol=lf
+# systemd unit 与 nginx 配置同理（nginx 对 CRLF 相对宽容，unit 文件里
+# 行尾多一个 \r 会让 ExecStart 解析失败）
+*.service  text eol=lf
+*.conf     text eol=lf
+
+*.cmd      text eol=crlf
+*.png      binary

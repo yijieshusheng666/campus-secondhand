@@ -90,13 +90,23 @@ public class DataInitializer implements CommandLineRunner {
 
     /**
      * 保证账号存在；若老库账号的 role 字段为空（旧库兼容），启动时回填一次。
+     *
+     * <p>⚠️ 这里曾经用 {@code userRepository.count() == 0} 当「要不要新建」的判据，
+     * 是一个只在**全新数据库**上才暴露的 bug：第一个账号 admin 建成后 count 变成 1，
+     * 第二个账号 test 就直接跳过创建、findByStuid 拿到 null，
+     * 于是 {@code run()} 里 {@code admin != null && testUser != null} 不成立，
+     * <b>整批种子商品都不会写入</b>。表现是「启动日志写着初始化完成，但库里 0 件商品」。
+     * 本地开发库早就有了这两个账号，所以一直没发现；换台干净服务器部署立刻现形。</p>
+     *
+     * <p>正确判据是「这个学号是否已存在」，与表里有多少人无关。</p>
      */
     private User ensureUser(String username, String stuid, String password, String role) {
-        if (userRepository.count() == 0) {
+        User existing = userRepository.findByStuid(stuid);
+        if (existing == null) {
             User u = new User();
             u.setUsername(username);
             u.setStuid(stuid);
-            // 内置账号也必须存哈希：以前这里是明文 admin123/test123，
+            // 内置账号也必须存哈希：以前这里是明文口令，
             // 一次库泄漏就等于把管理员口令白送出去。
             u.setPassword(passwordEncoder.encode(password));
             u.setRole(role);
@@ -104,8 +114,6 @@ public class DataInitializer implements CommandLineRunner {
             logger.info("初始化用户：{}，ID：{}", u.getUsername(), u.getId());
             return u;
         }
-        User existing = userRepository.findByStuid(stuid);
-        if (existing == null) return null;
         if (role != null && !role.equals(existing.getRole())) {
             existing.setRole(role);
             userRepository.save(existing);

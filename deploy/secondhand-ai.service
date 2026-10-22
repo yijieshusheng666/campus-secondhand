@@ -1,0 +1,40 @@
+# ============================================================
+# 校园二手交易平台 —— AI 服务 systemd 单元
+# 放置路径：/etc/systemd/system/secondhand-ai.service
+#
+# 启用：
+#   systemctl daemon-reload
+#   systemctl enable --now secondhand-ai
+# ============================================================
+
+[Unit]
+Description=Secondhand AI Service (FastAPI)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=exec
+User=secondhand
+Group=secondhand
+WorkingDirectory=/opt/secondhand/ai-service
+EnvironmentFile=-/opt/secondhand/ai-service/.env
+
+# --workers 固定 1，不能调大：KnowledgeBase / VectorStore / BM25 都是
+# **进程内**持有的索引对象，多 worker 会让每个进程各建一份索引，
+# 表现为「运营台补录的知识条数不对」「刚重建的索引一半请求命中一半不命中」。
+# 要扩容得先把索引挪到外部（Redis / Qdrant / pgvector），而不是加大 workers。
+#
+# 监听 127.0.0.1：AI 服务不对公网暴露，只被 Spring Boot 调用。
+ExecStart=/opt/secondhand/ai-service/.venv/bin/uvicorn app.main:app \
+    --host 127.0.0.1 --port 8010 --workers 1 --proxy-headers
+
+Restart=always
+RestartSec=5
+
+# AI 服务要写 data/index/ 与 data/metrics/，不能用 ProtectSystem=strict
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
