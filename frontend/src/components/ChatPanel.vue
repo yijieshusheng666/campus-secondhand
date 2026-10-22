@@ -606,6 +606,21 @@ function modeLabel(mode) {
 }
 
 // 分片 → 中文名，界面上比 shard 字段（rules/guides/faq）好懂
+const SHARD_NAMES = {
+  rules: '平台规则',
+  guides: '操作指引',
+  faq: '高频问答',
+  campus: '校园场景',
+  reference: '商品参考'
+}
+const shardName = s => SHARD_NAMES[s] || s
+
+// 依据来源只渲染知识类条目；商品类走 goods 卡片，避免同一件东西出现两次
+const kbSources = sources =>
+  (sources || []).filter(s => s && (s.type === 'knowledge' || s.type === 'faq'))
+
+const pct = v => `${Math.round((v || 0) * 100)}%`
+
 // AI 助手在线状态。管理端能连上不代表聊天能连上（两跳路径不同：
 // ops 走普通 RestTemplate，流式走 streamRestTemplate 且 readTimeout=ZERO）。
 // 所以聊天面板自己探一次，比让人对着历史消息猜靠谱。
@@ -717,6 +732,30 @@ watch(() => currentUser.value?.id, async () => {
             <span v-if="msg.streaming && msg.text" class="caret"></span>
             <span v-if="msg.type === 'ai' && modeLabel(msg.mode)" class="mode-tag">{{ modeLabel(msg.mode) }}</span>
             <span v-if="msg.refused" class="refuse-tag">未找到依据</span>
+          </div>
+
+          <!-- 依据来源：需求 §2.1.3 要求规则类回答强制挂载来源。
+               后端 meta 事件里已经带 sources（含分片、溯源名、得分），
+               这里必须渲染出来 —— 只把数据存进 msg.sources 而不展示，
+               等于「有溯源能力但用户看不见」，答辩时会被直接问住。 -->
+          <div v-if="kbSources(msg.sources).length" class="source-box">
+            <div class="source-header">
+              依据来源
+              <span v-if="msg.confidence" class="conf">置信度 {{ pct(msg.confidence) }}</span>
+            </div>
+            <div v-for="(s, si) in kbSources(msg.sources)" :key="si" class="source-item">
+              <div class="source-title">
+                <span class="shard-chip">{{ shardName(s.shard) }}</span>
+                <span class="source-name">{{ s.title }}</span>
+                <span v-if="s.score" class="score">{{ pct(s.score) }}</span>
+              </div>
+              <div class="source-snippet">{{ s.snippet }}</div>
+              <div class="source-meta">
+                <span>{{ s.id }}</span>
+                <span v-if="s.source">{{ s.source }}</span>
+                <span v-if="s.updated">{{ s.updated }}</span>
+              </div>
+            </div>
           </div>
 
 
@@ -944,6 +983,71 @@ watch(() => currentUser.value?.id, async () => {
   background: #eee;
   border-radius: 8px;
   vertical-align: middle;
+}
+.source-box {
+  margin-top: 8px;
+  padding: 8px 10px;
+  background: #fbfbfb;
+  border: 1px dashed #e0e0e0;
+  border-radius: 10px;
+}
+.source-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  font-size: 11px;
+  color: #999;
+}
+.source-header .conf { color: #2e7d32; }
+.source-item + .source-item {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+.source-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 3px;
+}
+.shard-chip {
+  padding: 1px 5px;
+  font-size: 10px;
+  color: #8a6100;
+  background: #fff3c2;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+.source-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: #444;
+}
+.source-title .score {
+  padding: 1px 5px;
+  font-size: 10px;
+  color: #999;
+  background: #f2f2f2;
+  border-radius: 6px;
+}
+.source-snippet {
+  font-size: 12px;
+  color: #777;
+  line-height: 1.5;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: #bbb;
 }
 .safety-tip {
   margin-top: 8px;

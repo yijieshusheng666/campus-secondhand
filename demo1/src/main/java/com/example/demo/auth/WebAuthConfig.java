@@ -21,8 +21,17 @@ public class WebAuthConfig implements WebMvcConfigurer {
 
     private final AuthInterceptor authInterceptor;
 
-    /** 逗号分隔的允许来源；默认只放本机 Vite dev server。 */
-    @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173}")
+    /**
+     * 逗号分隔的允许来源；默认放本机 Vite dev server 的三种写法。
+     *
+     * <p>为什么必须带上 {@code http://[::1]:5173}：Windows 上 {@code localhost}
+     * 经常被解析到 IPv6 的 {@code ::1}，Vite 也可能只监听在 {@code [::1]} 上。
+     * 此时浏览器发出的 {@code Origin} 是 {@code http://[::1]:5173}，
+     * 若白名单里只有 localhost/127.0.0.1，Spring 会直接回 403
+     * （{@code Invalid CORS request}）——页面上表现为接口无端 403，
+     * 而用 curl 不带 Origin 测又一切正常，很容易误判成鉴权或后端故障。</p>
+     */
+    @Value("${app.cors.allowed-origins:http://localhost:5173,http://127.0.0.1:5173,http://[::1]:5173}")
     private String allowedOrigins;
 
     public WebAuthConfig(AuthInterceptor authInterceptor) {
