@@ -2,7 +2,7 @@
 
 面向高校场景的二手交易平台：Spring Boot + Vue 3 + **独立 AI 服务**（FastAPI）。
 除常规的发布 / 浏览 / 下单 / 订单管理外，还包含语义搜索、RAG 智能客服、担保交易状态机、
-双向评价、纠纷仲裁、求购反向撮合、宿舍楼拼单、以物换物等校园特色功能。
+双向评价、纠纷仲裁、求购反向撮合等校园特色功能。
 
 ## 只需改 N 处（拉下来跑不起来基本都是这里）
 
@@ -30,10 +30,10 @@
 ```
 ├── demo1/                              # 后端 Spring Boot（8080）
 │   └── src/main/java/com/example/demo/
-│       ├── controller/                 # 业务接口：商品 / 订单 / 消息 / 评价 / 纠纷 / 求购 / 拼单 / 换物 / AI 代理
-│       │                               # 14 个 Controller，按职责拆分（Auth / Goods / User / Recommend / Index / AdminQuery / Barter / Dispute / GroupBuy / Order / Wanted / Review / Message / Ai）
+│       ├── controller/                 # 业务接口：商品 / 订单 / 消息 / 评价 / 纠纷 / 求购 / AI 代理
+│       │                               # 12 个 Controller，按职责拆分（Auth / Goods / User / Recommend / Index / AdminQuery / Dispute / Order / Wanted / Review / Message / Ai）
 │       ├── web/                         # 通用工具：RequestUtils（参数解析）、ApiResponses（统一响应包装）
-│       ├── entity/                     # JPA 实体（含 reviews / disputes / wanted / group_buys / barters）
+│       ├── entity/                     # JPA 实体（含 reviews / disputes / wanted）
 │       ├── repository/                 # Spring Data JPA 仓库
 │       ├── service/                    # AiClient / OrderStateMachine / CreditService / WantedMatchService …
 │       └── DataInitializer.java        # 启动时按 seed-goods.json 初始化 30 件演示商品
@@ -58,7 +58,7 @@
 │       ├── images/                     # logo + 内置头像/分类图标/订单状态图标（统一静态资源）
 │       └── favicon.png / apple-touch-icon.png
 ├── docs/
-│   ├── ROADMAP.md                      # 15 项功能的「界面入口 + 现状」对照表
+│   ├── ROADMAP.md                      # 功能「界面入口 + 现状」对照表
 │   ├── verify/                         # 功能验收截图
 │   └── superpowers/                    # P0 AI 底座的设计文档与实施计划
 └── README.md
@@ -170,11 +170,12 @@ curl -X POST http://localhost:8080/api/ai/reindex
 
 ## 功能一览
 
-15 项功能的**界面入口与验收截图**见 [`docs/ROADMAP.md`](docs/ROADMAP.md)，此处只列分组：
+13 项功能的**界面入口与验收截图**见 [`docs/ROADMAP.md`](docs/ROADMAP.md)，此处只列分组：
 
-- **AI 能力**：RAG 智能客服（附依据来源）、语义搜索、对话摘要/议价助手、智能定价、内容风控、图片识别发布
+- **AI 能力**：RAG 智能客服、语义搜索、对话摘要/议价助手、智能定价、内容风控、图片识别发布
 - **交易信任**：学号实名、担保交易状态机（货款平台托管）、双向评价 + 信用分、纠纷仲裁
-- **校园场景**：课程号匹配教材、求购反向撮合、宿舍楼拼单、以物换物
+- **校园场景**：课程号匹配教材、求购反向撮合
+  （原「宿舍楼拼单」「以物换物」已下线，见 ROADMAP）
 
 关键设计取舍记录在 `docs/ROADMAP.md` 与 `ai-service/README.md`。
 

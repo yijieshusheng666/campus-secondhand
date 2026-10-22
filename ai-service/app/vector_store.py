@@ -134,8 +134,3 @@ class VectorStore:
             if filename.endswith(".json"):
                 names.append(filename[: -len(".json")])
         return names
-
-
-def create_store() -> VectorStore:
-    from app.config import settings
-    return VectorStore(settings.index_dir)

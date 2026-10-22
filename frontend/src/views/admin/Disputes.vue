@@ -4,6 +4,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useApiRequest } from '../../composables/useApiRequest'
 import { useCurrentUser } from '../../composables/useCurrentUser'
 import { ruleIcon } from '../../icons'
+import { formatTime } from '../../utils/format'
 
 const user = useCurrentUser()
 
@@ -68,11 +69,6 @@ async function rule(dispute, ruling) {
   } finally {
     submitting.value = 0
   }
-}
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 19)
 }
 
 onMounted(loadDisputes)

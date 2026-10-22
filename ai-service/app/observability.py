@@ -15,8 +15,6 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from datetime import date, datetime
 
-from app.config import settings
-
 logger = logging.getLogger("rag.trace")
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -138,14 +136,3 @@ def top_questions(limit: int = 10) -> list[dict]:
 def misses(limit: int = 50) -> list[dict]:
     """未命中/拒答问题清单（需求 §2.3.3：导出后人工补充进知识库）。"""
     return list(reversed(_state["misses"]))[:limit]
-
-
-def reset() -> None:
-    with _lock:
-        _state["total"] = 0
-        _state["answered"] = 0
-        _state["refused"] = 0
-        _state["by_day"].clear()
-        _state["modes"].clear()
-        _state["questions"].clear()
-        _state["misses"].clear()

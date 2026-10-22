@@ -7,6 +7,7 @@ import { escrowTag, statusTag } from '../constants/order'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import ReviewDialog from '../components/ReviewDialog.vue'
 import { statusIcon, escrowIcon, actionIcon } from '../icons'
+import { formatTime } from '../utils/format'
 
 const router = useRouter()
 const orders = ref([])
@@ -18,12 +19,7 @@ const disputeApi = useApiRequest('提交失败，请检查后端服务')
 const actionApi = useApiRequest('操作失败，请检查后端服务')
 
 // statusTag / escrowTag 来自 src/constants/order.js（曾与 User.vue 各抄一份导致配色漂移）
-
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 19)
-}
+// formatTime 来自 src/utils/format.js（曾在 5 个页面各写一份，精度各不相同）
 
 async function loadOrders() {
   if (!user.value) return

@@ -37,7 +37,6 @@ class Settings:
         self.sim_threshold_tfidf = float(os.getenv("SIM_THRESHOLD_TFIDF", "0.20"))
 
         self.index_dir = os.getenv("INDEX_DIR", os.path.join(BASE_DIR, "data", "index"))
-        self.faq_path = os.getenv("FAQ_PATH", os.path.join(BASE_DIR, "data", "faq.json"))
 
         # —— 知识库（RAG）——
         self.knowledge_dir = os.getenv("KNOWLEDGE_DIR", os.path.join(BASE_DIR, "data", "knowledge"))

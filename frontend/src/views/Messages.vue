@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
 import request, { AI_TIMEOUT } from '../api'
 import { useCurrentUser } from '../composables/useCurrentUser'
+import { formatTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -31,11 +32,6 @@ const assistPoints = ref([])
 const assistScripts = ref([])
 
 let timer = null
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(5, 16)
-}
 
 function isActive(c) {
   return active.value && active.value.goodsId === c.goodsId && active.value.peerId === c.peerId
@@ -272,7 +268,7 @@ onUnmounted(() => {
           :class="{ active: isActive(c) }" @click="openConversation(c)">
           <div class="conv-title">{{ c.goodsTitle || '（商品信息缺失）' }}</div>
           <div class="conv-sub">{{ c.peerName }}：{{ c.lastContent }}</div>
-          <div class="conv-time">{{ formatTime(c.lastTime) }}</div>
+          <div class="conv-time">{{ formatTime(c.lastTime, 'short') }}</div>
         </div>
       </aside>
 
@@ -306,7 +302,7 @@ onUnmounted(() => {
             <el-empty v-if="messages.length === 0" description="还没有消息，先打个招呼吧" :image-size="56" />
             <div v-for="m in messages" :key="m.id" class="msg-row" :class="{ mine: m.fromUserId === user.id }">
               <div class="msg-bubble">{{ m.content }}</div>
-              <div class="msg-time">{{ formatTime(m.createdAt) }}</div>
+              <div class="msg-time">{{ formatTime(m.createdAt, 'short') }}</div>
             </div>
           </div>
 

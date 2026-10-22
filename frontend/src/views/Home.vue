@@ -7,6 +7,7 @@ import request from '../api'
 import { CATEGORIES } from '../constants/goods'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import { categoryIcon } from '../icons'
+import { formatTime } from '../utils/format'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,11 +38,6 @@ const buyForm = ref({ receiver: '', phone: '', address: '' })
 const addresses = ref([])
 const selectedAddress = ref(null)
 
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 16)
-}
 
 // —— B3 商品评价：详情页展示这件宝贝收到的评分与评价 ——
 const EMPTY_REVIEW_SUMMARY = { count: 0, avgScore: 0, fromBuyers: 0, fromSellers: 0 }
@@ -344,7 +340,7 @@ async function openFromQuery() {
                 <el-rate :model-value="r.score" disabled size="small" />
               </div>
               <div class="rv-text">{{ r.content || '这位同学没有填写评价内容' }}</div>
-              <div class="rv-time">{{ formatTime(r.createdAt) }}</div>
+              <div class="rv-time">{{ formatTime(r.createdAt, 'minute') }}</div>
             </div>
 
             <div class="rv-foot">

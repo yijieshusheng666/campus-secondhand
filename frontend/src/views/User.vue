@@ -9,6 +9,7 @@ import ReviewDialog from '../components/ReviewDialog.vue'
 import { statusIcon, escrowIcon, actionIcon } from '../icons'
 import { escrowTag, statusTag } from '../constants/order'
 import { AVATARS, avatarUrl } from '../avatars'
+import { formatTime } from '../utils/format'
 import { currentUser as user, patchUser, setUser } from '../session'
 
 const router = useRouter()
@@ -126,10 +127,7 @@ async function submitVerify() {
 }
 
 // statusTag / escrowTag 来自 src/constants/order.js，不要再本地抄一份
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 19)
-}
+// formatTime 来自 src/utils/format.js
 
 function toLogin() {
   if (!user.value) router.push('/login')

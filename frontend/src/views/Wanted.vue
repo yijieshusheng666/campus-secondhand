@@ -6,6 +6,7 @@ import { useApiRequest } from '../composables/useApiRequest'
 import { CATEGORY_NAMES } from '../constants/goods'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import SectionTabs from '../components/SectionTabs.vue'
+import { formatTime } from '../utils/format'
 
 const router = useRouter()
 const user = useCurrentUser()
@@ -28,11 +29,6 @@ const matches = ref({})      // { [wantedId]: [goods...] }
 const matchMeta = ref({})    // { [wantedId]: { scanned, semanticCount, reasons } }
 const loadingMatch = ref(0)
 
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 16)
-}
 
 // 把后端返回的匹配依据整理成 { goodsId: reason }，供卡片展示
 function collectMeta(data) {
@@ -195,7 +191,7 @@ onMounted(loadWanted)
         </div>
         <div class="wanted-meta">
           {{ w.category || '不限分类' }} · 预算 {{ w.maxPrice ? '¥' + w.maxPrice : '不限' }}
-          · {{ formatTime(w.createdAt) }}
+          · {{ formatTime(w.createdAt, 'minute') }}
         </div>
         <div class="wanted-desc" v-if="w.description">{{ w.description }}</div>
         <div class="wanted-actions">

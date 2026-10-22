@@ -10,6 +10,7 @@
  */
 import { ref, computed, onMounted } from 'vue'
 import request from '../../api'
+import { pct } from '../../utils/format'
 
 const goods = ref([])
 const ai = ref(null)
@@ -66,8 +67,6 @@ const byCategory = computed(() => {
 })
 
 const maxCat = computed(() => Math.max(1, ...byCategory.value.map(r => r.value)))
-
-const pct = v => `${Math.round((v || 0) * 100)}%`
 
 const cards = computed(() => {
   const s = ai.value

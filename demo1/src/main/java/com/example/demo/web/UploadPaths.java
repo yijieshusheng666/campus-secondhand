@@ -46,7 +46,7 @@ public final class UploadPaths {
     }
 
     /**
-     * 拿到「确保存在」的���传目录。
+     * 拿到「确保存在」的上传目录。
      *
      * <p>以前这里写的是 {@code if (!folder.exists()) folder.mkdirs();}，
      * 完全忽略返回值 —— 建目录失败（比如没权限）不会立刻报错，

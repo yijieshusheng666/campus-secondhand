@@ -187,10 +187,6 @@ public class WantedMatchService {
             return goods;
         }
 
-        public Map<Long, String> getReasons() {
-            return reasons;
-        }
-
         /** 参与比对的商品总数（站上全部商品） */
         public int getScanned() {
             return scanned;

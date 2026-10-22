@@ -14,6 +14,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import request from '../../api'
+import { pct } from '../../utils/format'
 
 // 重建索引要重算全部条目的向量，是最慢的一个接口（条数多时可达分钟级），
 // 默认 10s 必然超时，这里单独给足。
@@ -34,7 +35,6 @@ const aiOffline = ref(false)
 const statCards = computed(() => {
   const s = summary.value
   if (!s) return []
-  const pct = v => `${Math.round((v || 0) * 100)}%`
   return [
     { label: '问答总量', value: s.total ?? 0, hint: '累计提问次数' },
     { label: '回答成功率', value: pct(s.successRate), hint: `已答 ${s.answered ?? 0} 次` },

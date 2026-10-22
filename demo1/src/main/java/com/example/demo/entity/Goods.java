@@ -118,8 +118,4 @@ public class Goods {
     public List<GoodsImage> getImages() {
         return images;
     }
-
-    public void setImages(List<GoodsImage> images) {
-        this.images = images;
-    }
 }

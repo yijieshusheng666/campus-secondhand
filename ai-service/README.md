@@ -104,7 +104,6 @@ uvicorn app.main:app --port 8000
 | `SIM_THRESHOLD` | `0.35` | **vector 模式**的召回最低相似度 |
 | `SIM_THRESHOLD_TFIDF` | `0.20` | **tfidf 模式**的召回最低相似度（实测标定，见下） |
 | `INDEX_DIR` | `data/index` | 索引持久化目录 |
-| `FAQ_PATH` | `data/faq.json` | 知识库文件 |
 | `VISION_BASE_URL` | 空 | **A3** 多模态模型地址（OpenAI 兼容） |
 | `VISION_API_KEY` | 空 | 为空则图片识别返回不可用 |
 | `VISION_MODEL` | 空 | 如 `glm-4v-flash` |

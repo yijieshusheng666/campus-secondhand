@@ -42,7 +42,6 @@ public class AuthInterceptor implements HandlerInterceptor {
             new String[]{"GET", "/api/reviews/goods/*"},
             new String[]{"GET", "/api/reviews/credit"},
             new String[]{"GET", "/api/wanted/open"},
-            new String[]{"GET", "/api/groupbuy/goods/*"},
             new String[]{"POST", "/api/recommend"},
             new String[]{"GET", "/api/ai/search"},
             new String[]{"GET", "/api/ai/price-suggest"},

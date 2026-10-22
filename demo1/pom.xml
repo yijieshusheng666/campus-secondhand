@@ -47,10 +47,8 @@
     </pluginRepositories>
 
     <dependencies>
-        <dependency>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-starter</artifactId>
-        </dependency>
+        <!-- 不需要单独声明 spring-boot-starter：starter-web 已经把它作为传递依赖带进来，
+             再写一遍只是重复声明（dependency:analyze 会报 unused declared）。 -->
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

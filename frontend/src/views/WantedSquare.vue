@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import { useApiRequest } from '../composables/useApiRequest'
 import { useCurrentUser } from '../composables/useCurrentUser'
 import SectionTabs from '../components/SectionTabs.vue'
+import { formatTime } from '../utils/format'
 
 const router = useRouter()
 const user = useCurrentUser()
@@ -19,11 +20,6 @@ const loadingMatch = ref(0)
 const matches = ref({})      // { [wantedId]: [goods...] }
 const matchMeta = ref({})    // { [wantedId]: { scanned, semanticCount, reasons } }
 
-
-function formatTime(t) {
-  if (!t) return ''
-  return String(t).replace('T', ' ').slice(0, 16)
-}
 
 async function loadSquare() {
   loading.value = true
@@ -97,7 +93,7 @@ onMounted(loadSquare)
         </div>
         <div class="wanted-meta">
           {{ w.userName }} 求购 · 预算 {{ w.maxPrice ? '¥' + w.maxPrice : '不限' }}
-          · {{ formatTime(w.createdAt) }}
+          · {{ formatTime(w.createdAt, 'minute') }}
         </div>
         <div class="wanted-desc" v-if="w.description">{{ w.description }}</div>
         <div class="wanted-actions">

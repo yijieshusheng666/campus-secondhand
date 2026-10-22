@@ -22,10 +22,6 @@ public final class AuthContext {
     }
 
     /** 未登录返回 null。白名单接口用它做「登录了就走个人化、没登录就跳过」。 */
-    public static AuthUser current() {
-        return CURRENT.get();
-    }
-
     public static Long userIdOrNull() {
         AuthUser user = CURRENT.get();
         return user == null ? null : user.id();

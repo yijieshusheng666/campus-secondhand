@@ -6,7 +6,6 @@ import { ElementPlusResolver } from 'unplugin-vue-components/resolvers'
 
 // 后端地址：开发环境所有 /api 与 /uploads 请求都转发到这里。
 // 部署时改成你的服务器域名即可，调用方无需改。
-// 后端地址：开发环境所有 /api 与 /uploads 请求都转发到这里。
 // 用 127.0.0.1 而不是 localhost：localhost 会解析出 ::1 和 127.0.0.1，
 // ::1 排在前面，若后端只监听 IPv4 就会间歇性连不上（同样的坑 ai.service.url 也踩过）。
 const BACKEND = 'http://127.0.0.1:8080'
